@@ -1,0 +1,501 @@
+#!/usr/bin/python
+
+# Copyright (c) 2014-2015 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+# Jira Python documentation here: http://jira-python.readthedocs.org/en/latest/
+
+import sys
+
+if sys.version_info < (2, 6):
+    print "Error: Please use python 2.6 or greater"
+    sys.exit(1)
+
+dependencies_to_check = [
+    # (Package name, RPM name)
+    ("pytz", "pytz"),
+    ("xdg", "pyxdg"),
+    ("dateutil", "python-dateutil"),  # Required by Jira module
+    ("requests", "python-requests"),  # Required by Jira module
+    ("six", "python-six")  # Required by Jira module
+]
+
+for package, rpm in dependencies_to_check:
+    try:
+        __import__(package)
+    except ImportError:
+        sys.exit(('You need to install the Python package "{package}"!\n'
+                  'Install it by adding the RPM "{rpm}" using your'
+                  ' package-management utility.\n'
+                  'Alternatively it can be installed by '
+                  'running "pip install {package}".').format(
+                      package=package, rpm=rpm))
+import pytz
+from os.path import dirname, realpath
+sys.path.insert(0, dirname(realpath(sys.argv[0])) + "/../3pp/keyring/")
+import keyring
+sys.path.insert(0, dirname(realpath(sys.argv[0])) + "/../3pp/jira-python")
+from jira.client import JIRA, JIRAError
+
+from dateutil import parser
+import datetime
+import getpass
+import re
+from optparse import OptionParser
+import ConfigParser
+from os.path import isfile
+from os import getcwd
+from xdg import BaseDirectory
+
+NAME = "logwork"
+USAGE = "%prog [ISSUE] [SPENT] [DATE] [MSG] [OPTIONS]"
+DESCRIPTION = (
+    "%prog is a tool for time logging in Jira using the command line. "
+    "Supports both interactive input and/or direct command line input. "
+    "When in branch directory, issue name will parsed from folder name. "
+    "A summary of logged time for last N days can be generated. "
+    "Filters can be changed for interactive mode and summary. "
+    "Username is stored in config file and password in Linux keyring.")
+EPILOG = """
+Examples:
+  %prog
+  %prog KREATV-26648 4m "Singing along" -f
+  %prog KREATV-23955 2015-01-01 1h "Meeting"
+  %prog --issue=KREATV-25570 --date=1 -s4m -m"Testing..." -v
+  %prog --filter='"Epic Link"=KREATV-25678 and status != closed'
+  %prog --summarize=1 -v
+"""
+LINE = "----------------------------------"
+
+class odart():
+    DEFAULT_SERVER = "http://odart.arrisi.com"
+
+    def __init__(self, user, password, server=DEFAULT_SERVER):
+        self.user = user
+        self.password = password
+        self.jira = None
+        self.gh = None
+        self.server = server
+        if self.server is None:
+            self.server = self.DEFAULT_SERVER
+
+    def connect(self):
+        options = {'server': self.server}
+        self.jira = JIRA(options=options,
+                         basic_auth=(self.user, self.password))
+
+class Config():
+    SECTION = "Settings"
+
+    def __init__(self):
+        self.path = BaseDirectory.save_config_path(NAME) + "/%s.conf" % NAME
+        self.parser = ConfigParser.ConfigParser()
+        if not isfile(self.path):
+            self.parser.add_section(self.SECTION)
+            self.parser.write(open(self.path, 'wb+'))
+
+        try:
+            self.parser.read(self.path)
+        except KeyboardInterrupt:
+            raise
+        except:
+            print "Unable to read configuration file"
+            raise
+
+    def set(self, name, value):
+        self.parser.set(self.SECTION, name, value)
+        self.parser.write(open(self.path, 'wb+'))
+
+    def get(self, name):
+        try:
+            return self.parser.get(self.SECTION, name)
+        except ConfigParser.NoOptionError:
+            return None
+
+def user_input(question, password=False):
+    if password:
+        value = getpass.getpass(question)
+    else:
+        value = raw_input(question)
+    return value
+
+def get_login_data(options, config):
+    store = True
+    user = None
+    password = None
+    if options.user:
+        user = options.user
+    else:
+        store = False
+        user = config.get("user")
+
+    if user is None:
+        store = True
+        user = user_input("Jira user name: ")
+
+    if store:
+        config.set("user", user)
+
+    try:
+        keys = keyring.backends.Gnome.Keyring()
+        password = keys.get_password(NAME, user)
+    except KeyboardInterrupt:
+        raise
+    except:
+        print "Warning: Unable to get password from gnome keyring"
+
+    if password is None:
+        password = user_input("Jira password: ", password=True)
+        try:
+            keys.set_password(NAME, user, password)
+        except KeyboardInterrupt:
+            raise
+        except keyring.errors.PasswordSetError:
+            print "Warning: Unable to save password in gnome keyring"
+        except:
+            pass
+
+    return (user, password)
+
+def parse_summarize(options, o):
+    now = pytz.utc.localize(datetime.datetime.utcnow()).date()
+    delta = datetime.timedelta(days=(options.summarize - 1))
+    start_date = now - delta
+    end_date = now
+
+    if not options.filter:
+        filter = "key in workedissues(\"%s\", \"%s\", \"%s\")" % (start_date,
+                                                                  end_date,
+                                                                  o.user)
+    else:
+        filter = options.filter
+    req_issue_count = 50
+    start_pos = 0
+    issues = []
+    req_fields = "worklog"
+    while True:
+        issues_tmp = o.jira.search_issues(filter,
+                                          fields=req_fields,
+                                          startAt=start_pos,
+                                          maxResults=req_issue_count)
+        issues += issues_tmp
+        start_pos += req_issue_count
+        if len(issues_tmp) < req_issue_count:
+            break
+
+    sum_sec_spent = 0
+    for issue in issues:
+        for worklog in issue.fields.worklog.worklogs:
+            if worklog.author.name == o.user:
+                started = parser.parse(worklog.started)
+                if start_date <= started.date() <= end_date:
+                    date = started.date()
+                    spent = worklog.timeSpent
+                    msg = ""
+                    if hasattr(worklog, 'comment'):
+                        msg = worklog.comment
+                    if options.verbose:
+                        print "%s: %s, %s, %s" % (issue.key, date, spent, msg)
+                    sum_sec_spent += worklog.timeSpentSeconds
+
+    sum_hour_spent = sum_sec_spent / 3600
+    sum_sec_spent -= sum_hour_spent * 3600
+    sum_min_spent = sum_sec_spent / 60
+    sum_sec_spent -= sum_min_spent * 60
+    return (sum_hour_spent, sum_min_spent)
+
+def parse_date_input(input_value):
+    time_now = pytz.utc.localize(datetime.datetime.utcnow())
+    try:
+        date = datetime.datetime.strptime(input_value, "%Y-%m-%d")
+        delta = time_now.date() - pytz.utc.localize(date).date()
+    except ValueError:
+        delta = None
+
+    if delta is None:
+        try:
+            days = int(input_value)
+            delta = datetime.timedelta(days=days)
+        except ValueError:
+            return None
+
+    started = time_now - delta
+    return started
+
+def parse_issue(options, args, o):
+    issue_pattern = "(?:^|/)([A-Z][A-Z\d]*-\d+)"
+    for arg in (args + [getcwd()]):
+        issue_match = re.search(issue_pattern,
+                                arg,
+                                flags=re.IGNORECASE)
+        if issue_match:
+            try:
+                args.remove(arg)
+            except ValueError:
+                pass
+            break
+
+    req_fields = "summary,status"
+    if options.issue:
+        try:
+            selected_issue = o.jira.issue(options.issue, fields=req_fields)
+        except KeyboardInterrupt:
+            raise
+        except:
+            print "Error: No issue found"
+            sys.exit(1)
+    elif issue_match:
+        selected_issue = o.jira.issue(issue_match.group(1),
+                                      fields=req_fields)
+    elif not options.force:
+        if not options.filter:
+            filter = ("assignee = %s AND status != Closed") % o.user
+        else:
+            filter = options.filter
+        issues = o.jira.search_issues(filter,
+                                      fields=req_fields)
+
+        for index, issue in enumerate(issues):
+            print "%d) %s: %s" % (index + 1, issue.key, issue.fields.summary)
+
+        selected_issue = None
+        print LINE
+        while True:
+            selection_input = user_input("Select issue to timelog: ")
+            issue_match = re.search(issue_pattern,
+                                    selection_input,
+                                    flags=re.IGNORECASE)
+            if issue_match:
+                selected_issue = o.jira.issue(issue_match.group(1),
+                                              fields=req_fields)
+                break
+            try:
+                selection_int = -1 + int(selection_input)
+                if 0 <= selection_int < len(issues):
+                    selected_issue = issues[selection_int]
+                    break
+            except ValueError:
+                pass
+
+        print LINE
+    else:
+        print "Error: No issue selected!"
+        sys.exit(1)
+
+    return selected_issue
+
+def parse_date(options, args):
+    date_match = None
+    for arg in args:
+        date_match = re.search("(^[0-9]+$)|(^[0-9]{4}-[0-1][0-9]-[0-3][0-9]$)",
+                               arg)
+        if date_match:
+            args.remove(arg)
+            break
+
+    if options.date:
+        started = parse_date_input(options.date)
+        if started is None:
+            print "Error: Invalid date \"%s\"" % options.date
+            sys.exit(1)
+    elif date_match:
+        started = parse_date_input(date_match.group(0))
+        if started is None:
+            print "Error: Invalid date \"%s\"" % options.date
+            sys.exit(1)
+    elif not options.force:
+        while True:
+            try:
+                value = user_input("Work start date (YYYY-MM-DD) "
+                                   "or (N) day(s) ago [0]: ")
+                if value == "":
+                    value = "0"
+                started = parse_date_input(value)
+                if started is not None:
+                    break
+            except ValueError:
+                pass
+
+    else:
+        started = parse_date_input("0")
+        print "Warning: Assuming now as date/time"
+
+    return started
+
+def parse_spent(options, args):
+    spent_array = []
+    for arg in args[:]:
+        spent_match = re.search("^[0-9.]+[dwhm]$",
+                                arg,
+                                flags=re.IGNORECASE)
+        if spent_match:
+            args.remove(arg)
+            spent_array.append(arg)
+
+    if options.spent:
+        spent = options.spent
+    elif len(spent_array) != 0:
+        spent = " ".join(spent_array)
+    elif not options.force:
+        spent = user_input("Time spent (ex: 1w 2h 3m): ")
+    else:
+        print "Error: No time spent specified"
+        sys.exit(1)
+
+    return spent
+
+def parse_message(options, args):
+    if options.msg:
+        msg = options.msg
+    elif len(args) == 1:
+        msg = args[0]
+    elif not options.force:
+        msg = user_input("Worklog comment:\n")
+    else:
+        msg = ""
+        print "Warning: Assuming no comment!"
+
+    return msg
+
+def prompt_user():
+    while True:
+        input_str = user_input("Send worklog to Jira?: [Y/n] ").lower()
+        if input_str in ("", "y", "yes"):
+            break
+        elif input_str in ("n", "no"):
+            print "No worklog sent"
+            exit(1)
+
+def send_worklog(options, issue, date, spent, msg, o):
+    try:
+        if not options.test:
+            adjust_estimate = "auto"
+            if options.leave_estimate:
+                adjust_estimate = "leave"
+            o.jira.add_worklog(issue=issue,
+                               started=date,
+                               timeSpent=spent,
+                               comment=msg,
+                               adjustEstimate=adjust_estimate)
+
+            print "Time has been logged in JIRA"
+        else:
+            print "Time has NOT been logged in JIRA"
+    except ValueError:
+        print "Error: There is an issue with an older Jira version,"
+        print "please run pip install --upgrade jira for latest version."
+        sys.exit(1)
+    except Exception, e:
+        if options.verbose:
+            raise
+        else:
+            print "Error: Failed to log time due to internal error. \"%s\"" % e
+            sys.exit(1)
+
+def main(argv):
+    class MyParser(OptionParser):
+        def format_epilog(self, formatter):
+            return self.epilog.replace("%prog", self.get_prog_name())
+
+    oparser = MyParser(prog=NAME,
+                       usage=USAGE,
+                       description=DESCRIPTION,
+                       epilog=EPILOG)
+    oparser.add_option("-f", "--force", dest="force", default=False,
+                       action="store_true",
+                       help=("Disable both interactive mode and query "
+                             "before transmitting worklog."))
+    oparser.add_option("-i", "--issue", dest="issue", default=None,
+                       help=("jira issue, ex. KREATV-1234"),
+                       metavar="ISSUE")
+    oparser.add_option("-d", "--date", dest="date", default=None,
+                       help=("work start date (YYYY-MM-DD) "
+                             "or delta days (0 today, 1 yesterday)"),
+                       metavar="DATE")
+    oparser.add_option("-s", "--spent", dest="spent", default=None,
+                       help=("time spent, for example "
+                             "1w 2d 1h (seconds is not supported by Jira)"),
+                       metavar="SPENT")
+    oparser.add_option("-l", "--leave-estimate", default=False,
+                       action="store_true", dest="leave_estimate",
+                       help=("don't change the remaining "
+                             "time estimate when logging work"))
+    oparser.add_option("-m", "--msg", dest="msg", default=None,
+                       help=("worklog message"),
+                       metavar="MESSAGE")
+    oparser.add_option("-F", "--filter", dest="filter", default=None,
+                       help=("changes the filter used to populate issue list"),
+                       metavar="FILTER")
+    oparser.add_option("-S", "--summarize", dest="summarize", default=None,
+                       help=("summarizes the last N number of days"
+                             " of logged work by current user. "
+                             "Use verbose option to see info about "
+                             "logged work"),
+                       type="int")
+    oparser.add_option("-u", "--user", dest="user", default=None,
+                       help=("jira username, stored in config file"),
+                       metavar="USERNAME")
+    oparser.add_option("-r", "--server", dest="server", default=None,
+                       help=("jira server url, defaulting to %s"
+                             % odart.DEFAULT_SERVER),
+                       metavar="SERVER")
+    oparser.add_option("-v", action="store_true", default=False,
+                       dest="verbose",
+                       help=("enable more debug output"))
+    oparser.add_option("--test", action="store_true", default=False,
+                       dest="test",
+                       help=("don't send worklog to Jira server"))
+
+    (options, args) = oparser.parse_args()
+
+    config = Config()
+    (user, password) = get_login_data(options, config)
+
+    o = odart(user, password, options.server)
+
+    try:
+        try:
+            o.connect()
+        except JIRAError:
+            keys = keyring.backends.Gnome.Keyring()
+            keys.delete_password(NAME, user)
+            raise
+    except KeyboardInterrupt:
+        raise
+    except:
+        print "Failed to connect to Jira, check username and password"
+        sys.exit(1)
+
+    if options.summarize is not None:
+        (hour, min) = parse_summarize(options, o)
+        print "%dh %dm" % (hour, min)
+        return
+
+    issue = parse_issue(options, args, o)
+    date = parse_date(options, args)
+    spent = parse_spent(options, args)
+    msg = parse_message(options, args)
+
+    if options.verbose or not options.force:
+        print LINE
+        print "%s: %s" % (issue.key, issue.fields.summary)
+        print "Work start (UTC): %s " % date.strftime("%Y-%m-%d %H:%M:%S")
+        print "Logged time: %s" % spent
+        print "Log comment: %s" % msg
+        print LINE
+
+    if not options.force:
+        prompt_user()
+
+    send_worklog(options, issue.key, date, spent, msg, o)
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv)
+    except KeyboardInterrupt:
+        print ""
+        sys.exit(1)

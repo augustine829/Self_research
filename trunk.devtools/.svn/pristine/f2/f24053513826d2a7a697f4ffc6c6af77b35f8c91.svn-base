@@ -1,0 +1,8 @@
+#!/bin/sh
+
+program=$(make getvar-BSG_SRC)/test/scripts/py/disable_katt_test
+if [ ! -x "$program" ]; then
+    echo "Error: $program doesn't exist. Make sure you run this tool on a rather new bsg branch." >&2
+    exit 1
+fi
+exec $program "$@"

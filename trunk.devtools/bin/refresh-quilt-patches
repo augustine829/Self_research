@@ -1,0 +1,10 @@
+#! /bin/sh
+
+set -e
+
+if quilt applied 2>/dev/null; then
+    quilt pop -a
+fi
+while quilt push; do
+    quilt refresh
+done

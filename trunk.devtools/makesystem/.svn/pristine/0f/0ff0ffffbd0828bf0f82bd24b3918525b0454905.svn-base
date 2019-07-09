@@ -1,0 +1,52 @@
+#!/bin/bash
+
+KW_HOST=chieftec
+KW_REMOTE_ROOT=/tmp/$USER
+KW_REMOTE_SRC=$KW_REMOTE_ROOT/src
+
+#sync over headers
+inc=-I.
+for p in $INCPATH;   
+    do 
+    relpath=${p:2}; 
+    if [ "." != $relpath ]; 
+    then 
+	echo "transferring includes $relpath";
+	inc="$inc -I../${relpath/.*\/}"
+	rsync -ar $relpath $USER@$KW_HOST:$KW_REMOTE_ROOT/; 
+    fi 
+done 
+
+#create tempdir with commandfile and settings
+mkdir -p .kw
+cp $KW_CONF_PATH/* .kw
+
+cat > .kw/cmd <<EOF
+#!/bin/sh
+export KLOCWORK_LICENSE_FILE=7000@sail-a.corp.mot.com:27000@sail-c.corp.mot.com:27000@bike-a.corp.mot.com
+/opt/tools/Klocwork_7.5.1.10/DevelopmentEdition/bin/kwinforce \\
+--errors-config=$KW_REMOTE_SRC/.kw/problems.pconf.xml \\
+--metrics-config=$KW_REMOTE_SRC/.kw/metrics.mconf \\
+--use-filter=$KW_REMOTE_SRC/.kw/filter \\
+--report-file review.txt \\
+--usage-details \\
+$inc \\
+$KW_SRCS
+EOF
+
+#transfer source
+echo "transferring source"
+includes='--include */ --include *.c --include *.cpp, --include *.h --include .kw/*'
+excludes='--exclude *'
+rsync $exclude $includes -ar . $USER@$KW_HOST:$KW_REMOTE_SRC
+
+echo "running klocwork on $KW_HOST"
+echo "    this will take some minutes"
+ssh $KW_HOST "mkdir -p $KW_REMOTE_SRC; cd $KW_REMOTE_SRC; bash .kw/cmd"
+scp $USER@$KW_HOST:$KW_REMOTE_SRC/review.txt .
+
+#cleanup
+ssh $KW_HOST "rm -rf $KW_REMOTE_SRC"
+rm -rf .kw
+
+echo "Review completed: look at review.txt for the result"

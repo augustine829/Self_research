@@ -1,0 +1,33 @@
+#!/bin/bash
+# Script to upload a boot image
+# The script tries to be smart and figure out where to upload the boot image
+# based on the file name.
+#
+# Environment variables used:
+#   TFTPHOST, Which server to put images on
+#   STBMODEL, The model to use (19x3, 28x3, 29x2...)
+#   REMOTEUSER, the user id in TFTPHOST (default is $USER)
+
+TOOLDIR=$(dirname $(which $0))
+${TOOLDIR}/_checkenv -m -t || exit 1
+
+. ${TOOLDIR}/_fixmodel
+
+. ${TOOLDIR}/_setremoteuser
+
+if [ -z $1 ]; then
+   echo "Uploads a boot image to ${TFTPHOST}:/tftpboot/${REMOTEUSER}/${model}"
+   echo "Usage: $0 <boot-image>"
+   exit 1
+fi
+
+if [ -z "${1##*nfs*}" ]; then
+    DEST=/tftpboot/${REMOTEUSER}/$model/kernel-nfs
+else
+    DEST=/tftpboot/${REMOTEUSER}/$model/boot-image
+fi
+
+echo "Uploading boot image to ${TFTPHOST}:${DEST}"
+
+chmod go+r $1
+scp -p $1 ${REMOTEUSER}@${TFTPHOST}:${DEST}

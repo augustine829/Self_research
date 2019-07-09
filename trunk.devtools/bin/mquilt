@@ -1,0 +1,47 @@
+#! /bin/sh
+
+set -eu
+
+usage() {
+    cat <<EOF
+Usage: $(basename $0) <arguments sent to quilt>
+
+This script changes directory to SRC_DIR specified in the Makefile in the
+current directory and then runs quilt(1).
+
+SRC_DIR paths that are constructed from the TOOLCHAIN variable are currently
+not supported.
+EOF
+}
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 1
+fi
+if [ "$1" = -h -o "$1" = --help ]; then
+    usage
+    exit 0
+fi
+
+if [ ! -f Makefile ]; then
+    echo "Error: No such file: $(pwd)/Makefile" >&2
+    exit 1
+fi
+src_dir=$(printf 'include Makefile\nx:;@echo $(SRC_DIR)' | make -f - x)
+if [ ! -d "$src_dir" ]; then
+    echo "Error: Source directory \"$src_dir\" not found; probably failed to extract SRC_DIR from Makefile" >&2
+    exit 1
+fi
+
+# Rewrite arguments that refer to files in SRC_DIR so that they still are valid
+# after changing directory. This makes it possible to run "mquilt add
+# SRC_DIR/file", which you may want to do when using shell completion to find
+# the files to add.
+commandline="quilt"
+while [ "$#" -gt 0 ]; do
+    commandline="$commandline ${1#$src_dir/}"
+    shift
+done
+
+cd $src_dir
+exec $commandline

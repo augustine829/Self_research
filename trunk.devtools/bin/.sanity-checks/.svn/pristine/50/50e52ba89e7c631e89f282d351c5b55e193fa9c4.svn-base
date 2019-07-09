@@ -1,0 +1,64 @@
+#!/bin/sh
+
+set -u
+
+REPOS="$1"
+TXN="$2"
+ORIGIN="$3"
+
+# Debug variant of svnlook that operate on a WC instead of a real repo
+svnlook_debug()
+{
+  case $1 in
+    diff)
+      # $4 can be a svn dir or file
+      svn diff --no-diff-deleted "$4" 2>/dev/null |
+        filterdiff --addprefix=bsg/branches/
+      ;;
+  esac
+}
+
+if [ "${USE_DEBUG_SVNLOOK:-false}" = "true" ]; then
+    alias svnlook=svnlook_debug
+fi
+
+# Temporary file to hold the diff
+diff=$(mktemp -t commitdiff.XXXXXXXX)
+trap "test -f '$diff' && rm -f '$diff'" EXIT
+
+# Filter out changes to source files (C/C++ and JS) in bsg and portals,
+# ignoring 3PP:s and VIP2000 branch(es).
+svnlook diff --no-diff-deleted --diff-copy-from "$REPOS" -t "$TXN" |
+  filterdiff \
+    -i 'bsg/*' \
+    -i 'build_server/build_system/*' \
+    -i 'portals/testportal/*' \
+    -i 'portals/KA_testportal/*' \
+    -i 'portals/testGroupPortal/trunk/common/*' \
+    -i 'portals/testGroupPortal/trunk/portals/toi*' |
+  filterdiff -x '*/3pp/*' -x 'bsg/branches/VIP2000*' |
+  filterdiff -i '*.cpp' -i '*.c' -i '*.h' -i '*.js' -i '*.php' > "$diff"
+
+if [ $ORIGIN = "KA" ]; then
+    check_coding_style_script="check-coding-style-ka.pl"
+else
+    check_coding_style_script="check-coding-style.pl"
+fi
+
+# Exit with 0 if script can't be found to not block commits due to this
+if ! which $check_coding_style_script > /dev/null 2>&1; then
+    echo "Could not find $check_coding_style_script" >&2
+    exit 0
+fi
+
+
+debug=""
+if [ "${CHECK_DEBUG:-false}" = "true" ]; then
+  debug="--debug"
+fi
+
+if ! $check_coding_style_script $debug "$diff"; then
+    exit 1
+fi
+
+exit 0

@@ -1,0 +1,10 @@
+#! /bin/sh
+
+if [ "$1" = "-h" -o "$1" = "--help" ]; then
+    echo "Usage: svnconflicts"
+    echo
+    echo "Shows conflicts in an SVN working copy."
+    exit 0
+fi
+
+svn status | egrep '^(C|.C|......[C>]|\?.*\.prej$)'

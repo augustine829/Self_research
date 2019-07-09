@@ -1,0 +1,6 @@
+diff -r -u RBTools-0.7.5.orig/RBTools.egg-info/requires.txt RBTools-0.7.5/RBTools.egg-info/requires.txt
+--- RBTools-0.7.5.orig/RBTools.egg-info/requires.txt	2015-10-27 05:22:05.000000000 +0100
++++ RBTools-0.7.5/RBTools.egg-info/requires.txt	2016-02-12 00:01:59.605250669 +0100
+@@ -1 +1 @@
+-six>=1.8.0
++

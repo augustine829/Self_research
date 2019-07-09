@@ -1,0 +1,427 @@
+#!/usr/bin/env python
+
+from string import Template
+from string import upper
+from os.path import normpath
+from os.path import basename
+from os.path import dirname
+from os.path import realpath
+from os.path import join
+from os import readlink
+from os import mkdir
+from os import makedirs
+from os import sys
+from os import popen
+from os import remove
+from os import system
+from os import getcwd
+from os import chdir
+from shutil import copy
+from zipfile import ZipFile
+
+from optparse import OptionParser
+
+try:
+    set
+except NameError:
+    from sets import Set as set
+
+class Settings:
+    def __init__(self):
+        self.create_dependencies = None
+        self.autoimport = None
+        self.create_workspace = None
+        self.max_depth = None
+        self.eclipse_path = None
+        self.targets = None
+        self.force_targets = None
+
+settings = None
+dataDir = None
+createdProjects = None
+projectsToCreate = None
+
+def ParseOptions():
+
+    optionParser = OptionParser("usage: %prog [options]")
+    optionParser.add_option(
+        "-d", "--deps", dest="create_dependencies",
+        action="store_true",
+        help="Generate dependent project files as well, recursively")
+    optionParser.add_option(
+        "-m", "--max_depth", dest="max_depth",
+        action="store", type="int",
+        help="Maximum depth level when recursively generating" +
+        " dependent projects (default: infinite, 1: only top project)")
+    optionParser.add_option("-i", "--import", dest="autoimport",
+                            action="store_true",
+                            help="import project automatically into workspace")
+
+    optionParser.add_option("-w", "--workspace", dest="create_workspace",
+                            action="store_true",
+                            help="create a workspace")
+    optionParser.add_option("-e", "--eclipse_path", dest="eclipse_path",
+                            action="store",
+                            help="Path to eclipse executable")
+
+    optionParser.add_option(
+        "-t", "--targets", dest="targets",
+        action="store",
+        help="Generate build configuration for these targets only")
+
+    optionParser.add_option("-f", "--force", dest="force_targets",
+                            action="store_true",
+                            help="Force targets even if invalid")
+
+    (options, args) = optionParser.parse_args()
+
+    if options.create_dependencies:
+        settings.create_dependencies = options.create_dependencies
+
+    if options.autoimport:
+        settings.autoimport = options.autoimport
+
+    if options.create_workspace:
+        settings.create_workspace = options.create_workspace
+
+    if options.max_depth:
+        settings.max_depth = options.max_depth
+
+    if options.eclipse_path:
+        settings.eclipse_path = options.eclipse_path
+
+    if options.targets:
+        settings.targets = options.targets
+
+    if options.force_targets:
+        settings.force_targets = options.force_targets
+
+def CreateWorkspace():
+    metadata = GetMakeSystemVariable("BSG_SRC_ABS") + "/workspace/.metadata/"
+    mylyn = metadata + ".mylyn/"
+
+    try:
+        makedirs(mylyn)
+    except:
+        pass
+
+    reps = 'repositories.xml'
+
+    open(mylyn + reps + '.zip', "w").close()
+    z = ZipFile(mylyn + reps + '.zip', "w")
+    z.write(dataDir + reps, reps)
+    z.close()
+
+    plugins = metadata + '.plugins/'
+
+    pluginSettings = plugins + "org.eclipse.core.runtime/.settings/"
+    try:
+        makedirs(pluginSettings)
+    except BaseException, detail:
+        print detail
+        pass
+    try:
+        copy(dataDir + '/workspace/org.eclipse.cdt.ui.prefs',
+             pluginSettings + 'org.eclipse.cdt.ui.prefs')
+        copy(dataDir + '/workspace/org.eclipse.team.svn.core.prefs',
+             pluginSettings + 'org.eclipse.team.svn.core.prefs')
+        copy(dataDir + '/workspace/org.eclipse.ui.editors.prefs',
+             pluginSettings + 'org.eclipse.ui.editors.prefs')
+        copy(dataDir + '/workspace/org.eclipse.ui.prefs',
+             pluginSettings + 'org.eclipse.ui.prefs')
+        copy(dataDir + '/workspace/org.eclipse.epp.usagedata.gathering.prefs',
+             pluginSettings + 'org.eclipse.epp.usagedata.gathering.prefs')
+        copy(dataDir + '/workspace/org.eclipse.ui.workbench.prefs',
+             pluginSettings + "org.eclipse.ui.workbench.prefs")
+    except BaseException, detail:
+        print detail
+        pass
+
+    core = plugins + "org.eclipse.cdt.core/"
+    try:
+        makedirs(core)
+    except:
+        pass
+    try:
+        copy(dataDir + '/workspace/preferences',
+             core + "preferences")
+    except:
+        pass
+
+def GenerateWrapperMakefile():
+    m = open("/tmp/genMakefile.mk", "w")
+    m.write("include Makefile\ngetvar-%:\n\t@echo $($*)")
+    m.close()
+
+def GetMakeSystemVariable(variable, target="", flavour="", toolchain=""):
+    return popen("NO_ICECC=1 NO_CCACHE=1 CHK_SOURCES=1 TARGET="
+                 + target + " FLAVOUR=" + flavour + " TOOLCHAIN=" + toolchain +
+                 " make -f /tmp/genMakefile.mk getvar-"
+                 + variable).read()[:-1]
+
+def ModuleToProjectName(moduleName):
+    return ''.join([basename(moduleName),
+                    ' ( ', dirname(moduleName).replace('/', '|'), ' )'])
+
+def MaxDepthReached(depth):
+    if not settings.max_depth:
+        return False
+    if depth >= settings.max_depth:
+        return True
+    return False
+
+def DeriveEclipsePath():
+    try:
+        readlink(__file__)
+        return normpath(join(dirname(normpath(join(dirname(__file__),
+                                                   readlink(__file__))))),
+                        '../opt/eclipse/eclipse')
+    except:
+        return normpath(
+            join(dirname(normpath(join(dirname(__file__), __file__))),
+                 '../opt/eclipse/eclipse'))
+
+def PrintProgress():
+    print " Done: ", str(len(createdProjects)),
+    print " Left: ", str(len(projectsToCreate))
+
+def FindDependentProjects(depth, baseDir):
+    dependencies = GetMakeSystemVariable("REQUIRES").split(' ')
+    dependentProjects = ''
+    for dep in dependencies:
+            if settings.create_dependencies:
+                if MaxDepthReached(depth):
+                    print " Max depth reached, skipping " + baseDir + '/' + dep
+                else:
+                    try:
+                        createdProjects.index(dep)
+                    except:
+                        projectsToCreate.add((baseDir + '/' + dep, depth + 1))
+
+            print "  " + ModuleToProjectName(dep)
+
+            dependentProjects += '<project>' + ModuleToProjectName(dep)
+            dependentProjects += '</project>\n'
+    return dependentProjects
+
+
+def CreateProject(pathDepthTuple):
+    path, depth = pathDepthTuple
+    try:
+        chdir(path)
+
+        if GetMakeSystemVariable("COMPONENT_TARGETS") \
+           == GetMakeSystemVariable("TARGET_NAME_NOARCH"):
+            print "No architecture, no need to create anything"
+            return
+
+        baseDir = GetMakeSystemVariable("BSG_SRC_ABS")
+        normModule = normpath(GetMakeSystemVariable("COMPONENT"))
+        moduleName = ModuleToProjectName(normModule)
+        moduleDir = GetMakeSystemVariable("CURDIR")
+
+        print "Creating project ", moduleName,
+        PrintProgress()
+
+        print "Finding dependent modules"
+        dependentProjects = FindDependentProjects(depth, baseDir)
+
+        print "Creating .project and .cproject"
+
+        projectTemplateFile = open(dataDir + 'project.template')
+        cprojectTemplateFile = open(dataDir + 'cproject.template')
+        configurationTemplateFile = open(dataDir + 'configuration.template')
+        scannerTemplateFile = open(dataDir + 'scannerconfigbuildinfo.template')
+        projectTemplate = Template(projectTemplateFile.read())
+        cprojectTemplate = Template(cprojectTemplateFile.read())
+        configurationTemplate = Template(configurationTemplateFile.read())
+        scannerTemplate = Template(scannerTemplateFile.read())
+
+        settingsDir = moduleDir + '/.settings/'
+
+        try:
+            mkdir(settingsDir)
+        except:
+            pass
+
+        copy(dataDir + '/org.eclipse.mylyn.tasks.ui.prefs', settingsDir)
+        copy(dataDir + '/org.eclipse.cdt.ui.prefs', settingsDir)
+        copy(dataDir + '/org.eclipse.cdt.core.prefs', settingsDir)
+
+        if GetMakeSystemVariable("COMPONENT_IS_3PP") != '':
+            print "  3pp, should not index, but that doesn't work right now"
+
+        project_path = moduleDir + '/.project'
+        cproject_path = moduleDir + '/.cproject'
+
+        project = open(project_path, "w")
+        project.write(projectTemplate.safe_substitute(
+            DEPENDENT_PROJECTS=dependentProjects,
+            PROJECT_NAME=moduleName,
+            PROJECT_PATH=moduleDir))
+        project.close()
+
+        targetsString = GetMakeSystemVariable("TARGET_NAME_VIP")
+        # workaround for new makesystems
+        if not targetsString:
+            targetsString = GetMakeSystemVariable("COMPONENT_TARGETS")
+
+        targets = targetsString.split(" ")
+        targets.append(GetMakeSystemVariable("TARGET_NAME_TEST"))
+
+        # Change build configuration targets
+        if settings.targets:
+            newTargets = []
+            givenTargets = settings.targets.split(",")
+            for givenTarget in givenTargets:
+                if (givenTarget in targets) or settings.force_targets:
+                    newTargets.append(givenTarget)
+                else:
+                    print givenTarget,
+                    print "is not a valid target, use force to generate anyway"
+                    print " Valid targets: ", targets
+                    sys.exit(1)
+            if len(newTargets) > 0:
+                targets = newTargets
+
+        includes = ''
+        symbols = ''
+        configs = ''
+        cccompiler = {}
+        cxxcompiler = {}
+
+        # Setup compilers
+        for target in targets:
+            cccompiler[target] = GetMakeSystemVariable("CC", target)
+            cxxcompiler[target] = GetMakeSystemVariable("CXX", target)
+
+        for target in targets:
+            flavours = []
+            flavoursString = GetMakeSystemVariable("FLAVOURS-" + target)
+
+            if flavoursString != '':
+                flavours = flavoursString.split(' ')
+
+            flavoursString = GetMakeSystemVariable("FLAVOURS", target)
+
+            if flavoursString != '':
+                flavours.extend(flavoursString.split(' '))
+
+            if flavours == []:
+                flavours = ['']
+
+            for flavour in flavours:
+                print ("  Adding target configuration for " + target + " "
+                       + flavour)
+                toolchain = GetMakeSystemVariable("TOOLCHAIN", target, flavour)
+                includes = ''
+                symbols = ''
+                flags = GetMakeSystemVariable("CFLAGS", target, flavour,
+                                              toolchain).split(' ')
+                flags.extend(GetMakeSystemVariable("CXXFLAGS", target, flavour,
+                                                   toolchain).split(' '))
+
+                uniqueFlags = set(flags)
+                scannerConfigurations = ''
+
+                for scannerTarget in targets:
+                    scannerConfigurations += scannerTemplate.safe_substitute(
+                        TARGET=scannerTarget,
+                        CCCOMPILER=cccompiler[scannerTarget],
+                        CXXCOMPILER=cxxcompiler[scannerTarget])
+
+                for flag in uniqueFlags:
+                    if flag[:2] == '-I':
+                        includes += '<listOptionValue builtIn="false" value="'
+                        includes += realpath(flag[2:]) + '"/>\n'
+                    if flag[:2] == '-D':
+                        val = flag[2:].replace('"', '&quot;')
+                        symbols += '<listOptionValue builtIn="false" value="'
+                        symbols += val + '"/>\n'
+
+                excludes = targetsString.replace(' ', '/|')
+                excludes += '/|**/*.bak*/|**/.pc/'
+                tfseparator = ''
+                if flavour != "":
+                    tfseparator = '-'
+                configs = configs + configurationTemplate.safe_substitute(
+                    TARGET=target,
+                    TFSEPARATOR=tfseparator,
+                    FLAVOUR=flavour,
+                    UCASETARGET=upper(target),
+                    INCLUDES=includes,
+                    SYMBOLS=symbols,
+                    EXCLUDES=excludes,
+                    SCANNER=scannerConfigurations)
+
+        cproject = open(cproject_path, "w")
+        cproject.write(
+            cprojectTemplate.safe_substitute(CONFIGURATIONS=configs))
+        cproject.close()
+
+        # With eclipse installed we can get an automatic import into the
+        # workspace
+        if settings.autoimport:
+            eclipseBinary = ''
+            if settings.eclipse_path:
+                eclipseBinary = settings.eclipse_path
+            else:
+                eclipseBinary = DeriveEclipsePath()
+            print "Importing project into workspace"
+            command = " ".join([
+                eclipseBinary,
+                "--launcher.suppressErrors",
+                "-nosplash",
+                "-application",
+                "org.eclipse.cdt.managedbuilder.core.headlessbuild",
+                "-data",
+                baseDir,
+                "/workspace",
+                "-import",
+                GetMakeSystemVariable("CURDIR")])
+            system(command)
+
+        print ("Appending " + path + " to created projects"
+               + str(createdProjects))
+        createdProjects.append(path)
+        print "Done."
+
+    except BaseException, detail:
+        print "Error: ", detail
+
+
+def main():
+    global settings
+    settings = Settings()
+
+    ParseOptions()
+
+    global createdProjects
+    createdProjects = []
+    global projectsToCreate
+    projectsToCreate = set()
+    projectsToCreate.add((getcwd(), 1))
+
+    global dataDir
+    dataDir = '%s/../share/geneclipse/' % dirname(realpath(__file__))
+
+    GenerateWrapperMakefile()
+
+    # Just get the requires variable once. This takes care of the
+    # case that the build system wants to rebuild it's dependencies
+    GetMakeSystemVariable("REQUIRES")
+
+    if settings.create_workspace:
+        print "Creating workspace"
+        CreateWorkspace()
+
+    try:
+        while True:
+            CreateProject(projectsToCreate.pop())
+    except:
+        pass
+
+    remove('/tmp/genMakefile.mk')
+
+if __name__ == '__main__':
+    main()

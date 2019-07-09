@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# Usage:
+#
+#   mlc [-r]
+# Runs "make local_clean" in current directory
+#
+#   mlc [-r] dir1 dir2 ...
+# Runs "make local_clean" in all directories given as arguments
+#
+#  -r: Runs recursively
+#
+# Written by nqc643 Anders Petersson
+
+recursive_clean ()
+{
+  for dir in `find $1 -name Makefile` ; do
+    make -C `dirname $dir` local_clean 2>&1
+  done
+}
+
+mlc_in_dir ()
+{
+  if [ -z "$RECURSIVE" ] ; then
+    make -C $1 local_clean 2>&1
+  else
+    recursive_clean $1
+  fi
+}
+
+
+if [ "$1" == "-r" ] ; then
+  RECURSIVE=1
+  shift
+fi
+
+if [ $# -gt 0 ] ; then
+  for dir in $@ ; do 
+    mlc_in_dir $dir
+  done
+else
+  mlc_in_dir .
+fi
+

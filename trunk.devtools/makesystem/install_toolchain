@@ -1,0 +1,77 @@
+#!/bin/sh
+
+set -e
+set -u
+
+exec_path=$(dirname "$0")
+${exec_path}/check_env
+
+base_dir=/usr/local/kreatv
+
+if [ $# != 1 ]; then
+    echo "Installs a KreaTV toolchain package in $base_dir"
+    echo "Usage: $0 PACKAGE"
+    exit 1
+fi
+
+package=$1
+
+# Check that installation base directory exists
+if [ ! -d "$base_dir" ]; then
+    echo
+    echo "Error: The toolchain base directory \"$base_dir\" does not exist"
+    echo
+    echo "Please run the following command to create it (root password required):"
+    echo
+    echo "    su -c \"mkdir --mode=777 --parents $base_dir\""
+    echo
+    exit 1
+fi
+
+# Check that installation base directory is writable
+if [ ! -w "$base_dir" ]; then
+    echo
+    echo "Error: You do not have write access to the toolchain base directory \"$base_dir\""
+    echo
+    echo "Please run the following command to correct it (root password required):"
+    echo
+    echo "    su -c \"chown root:root $base_dir && chmod a=rwx,a-st $base_dir\""
+    echo
+    exit 1
+fi
+
+path=$(basename ${package##*://} ".tar.bz2" | tr "_" "/")
+
+# Check if toolchain already installed
+if [ -z "$path" ]; then
+    echo "Error: Could not figure out toolchain path from toolchain package name: $package"
+    exit 1
+elif [ -d "$base_dir/$path" ]; then
+    echo "Toolchain $base_dir/$path already installed -- nothing to do"
+    exit 0
+fi
+
+# Install new toolchain with world-writable permissions
+umask 000
+
+# Create temporary directory, and add trap to remove it on exit
+tmp_dir=$(mktemp -d $base_dir/tmp.XXXXXX)
+trap 'rm -rf $tmp_dir' EXIT
+
+# Toolchain package name with    embedded "://" => URL to download and install
+# Toolchain package name without embedded "://" => local file to install
+if expr match "$package" ".*://" > /dev/null; then
+    echo "Downloading and installing toolchain $package to $base_dir"
+    wget -e http_proxy= -nv --output-document=- $package | tar -xjC $tmp_dir
+elif [ ! -f "$package" ]; then
+    echo "Error: Toolchain package file $package does not exist"
+    exit 1
+else
+    echo "Installing toolchain $package to $base_dir"
+    tar -xjf $package -C $tmp_dir
+fi
+
+# Install unpacked toolchain from temporary directory
+dest_dir=$(dirname $base_dir/$path)
+mkdir -p $dest_dir
+[ ! -d $base_dir/$path ] && mv $tmp_dir/$path $dest_dir

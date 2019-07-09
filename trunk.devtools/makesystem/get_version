@@ -1,0 +1,36 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use strict;
+use warnings FATAL => 'all';
+use KreaTV;
+
+my $filename = shift;
+my $dir = KreaTV::backticks("dirname $filename");
+
+chomp $dir;
+
+`git rev-parse --is-inside-work-tree >/dev/null 2>&1`;
+if ($? == 0)
+{
+  my $ver = KreaTV::backticks("cd $dir\n git branch | grep \"*\" | sed -e 's/\* //'");
+  chomp $ver;
+  print "$ver";
+}
+else
+{
+  my $info = KreaTV::backticks("LC_ALL=C svn info $filename");
+  $info =~ m!URL: (.+)!;
+  my $url = $1;
+  if ($url =~ m!/(branches|tags|deadwood)/(.+)/!) {
+      print "$2";
+  }
+  elsif ($url =~ m!/(trunk)(/|$)!) {
+      print "$1";
+  }
+  else {
+      KreaTV::error("Could not get version for $filename: No match for $url");
+  }
+}

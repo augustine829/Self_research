@@ -1,0 +1,11 @@
+# ROOT=b
+
+all: a/ab
+
+a/ab: a/aa
+
+TREE_OSS_IGNORE = 
+
+TREEDIRS = a/aa a/ab
+
+include $(MAKESYSTEM)/tree.mk

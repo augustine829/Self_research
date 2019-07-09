@@ -1,0 +1,25 @@
+#!/bin/sh -e
+
+TOOLDIR=$(dirname $(which $0))
+
+${TOOLDIR}/_checkenv -m -n -r || exit 1
+
+. ${TOOLDIR}/_fixmodel
+
+if [ ! -e /usr/bin/sshfs ]; then
+  echo "Install sshfs: yum install fuse-sshfs"
+  exit 1
+fi
+
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 mountpoint"
+  exit 1
+fi
+
+if [ ! -d $1 ]; then
+  mkdir -p $1
+fi
+
+sshfs root@${ROOTHOST}:${NFSPATH}/${model}/rootdisk $1
+
+echo "Mounted rootdisk successfully. Use 'fuserumount -u $1' to unmount."

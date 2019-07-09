@@ -1,0 +1,428 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2013-2014 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use strict;
+use warnings FATAL => 'all';
+use KreaTV;
+use Cwd qw(abs_path);
+
+# Global variables
+my ($depend_file, $depend_name, $dest, %ignore_html, %processed_html, $source);
+
+my $verbose = $ENV{VERBOSE};
+
+# print_depends(files)
+sub print_depends {
+    while (my $depend = shift) {
+        print_depend($depend);
+    }
+}
+
+# print_depend(file)
+sub print_depend {
+    my $depend = shift;
+    if ($depend =~ m/build_data\.xml/) {
+        # No dependencies to build_data.xml
+        return;
+    }
+
+    if ($depend_file) {
+        chomp $depend;
+        $depend = abs_path($depend); # Normalize "./" and "../" parts.
+        if (-l $depend) {
+            # File $depend is a link, don't generate dependency
+            # since make has problems if the link point to a
+            # non existing file.
+            return;
+        }
+
+        my @dir_parts = split /\//, $depend_file;
+        my $dest_dir = join('/', splice(@dir_parts, 0, $#dir_parts));
+        if ($dest_dir && ! -d $dest_dir) {
+            KreaTV::system("mkdir -p $dest_dir");
+        }
+        KreaTV::system("echo '$depend_name: \$(wildcard $depend)' >> $depend_file");
+    }
+}
+
+# copy_html_file(html_file)
+sub copy_html_file {
+    my $html_file = shift;
+
+    $html_file =~ m!$source/(.*)!;
+    my $dest_path = $1;
+
+    my $dest_file = "$dest/$dest_path";
+
+    my @dir_parts = split /\//, $dest_file;
+    my $dest_dir = join('/', splice(@dir_parts, 0, $#dir_parts));
+
+    if (! -d $dest_dir) {
+        KreaTV::system("mkdir -p $dest_dir");
+    }
+    if (! -f $dest_file) {
+        KreaTV::system("cp $html_file $dest_file");
+        print_depend($html_file);
+    }
+}
+
+# copy_html_dir(html_dir)
+sub copy_html_dir {
+    my $html_dir = shift;
+
+    $html_dir =~ m!$source/(.*)!;
+    my $dest_path = $1;
+
+    my $dest_dir = "$dest/$dest_path";
+
+    KreaTV::system("mkdir -p $dest_dir");
+    KreaTV::system("cp $html_dir/* $dest_dir");
+
+    my @files = KreaTV::backticks("find $html_dir -type f");
+    print_depends(@files);
+}
+
+# html_tree(html_file, source_file, source_line)
+sub html_tree {
+    my $html_file = shift;
+    my $source_file = shift;
+    my $source_line = shift;
+    my $binary_skip = 0;
+
+    # Remove .. in path
+    while ($html_file =~ m!/([\w-]+?)/\.\.\/!) {
+        $html_file =~ s!$1/../!!;
+    }
+
+    if ($html_file =~ m!(:|\+)!) {
+        # skipping link file
+        return;
+    }
+
+    if ($html_file =~ m!(.+?)#(.*)!) {
+        $html_file = $1;
+    }
+
+    if ($html_file =~ m!(.pdf)!) {
+        $binary_skip = 1;
+    }
+
+    if ($html_file =~ m!(.png)!) {
+        $binary_skip = 1;
+    }
+
+    if ($html_file =~ m!(.jpg)!) {
+        $binary_skip = 1;
+    }
+
+    if ($html_file =~ m!(.gif)!) {
+        $binary_skip = 1;
+    }
+
+    # Skip files marked as ignore_html
+    my $skip = 0;
+    while (my $ignore = each %ignore_html) {
+        if ($html_file =~ m!$ignore!) {
+            $skip = 1;
+        }
+    }
+    if ($skip) {
+        return;
+    }
+
+    # Check for html file existence
+    if (! -e $html_file) {
+        $source_file =~ m!$source/(.+)!;
+        my $sf = $1;
+        $html_file =~ m!$source/(.+)!;
+        my $hf = $1;
+        KreaTV::error("In $sf line $source_line: $hf does not exist");
+    }
+
+    # Ignore already copied files
+    if (exists $processed_html{$html_file}) {
+        return;
+    }
+    $processed_html{$html_file} = 1;
+
+    if (-d $html_file) {
+        copy_html_dir($html_file);
+    }
+    else {
+        copy_html_file($html_file);
+    }
+
+    my @dir_parts = split /\//, $html_file;
+    my $html_dir = join('/', splice(@dir_parts, 0, $#dir_parts));
+
+    # Find linked files
+    my @files = ();
+    my @counts = ();
+    my $count = 1;
+    if ($binary_skip != 1) {
+        open(HTML_FILE, $html_file) or die "Could not open $html_file: $!";
+        while (my $line = <HTML_FILE>) {
+            while ($line =~ m/(src|SRC|href|HREF)=\"(.*?)\"/g) {
+                push @files, $2;
+                push @counts, $count;
+            }
+            # Find dTree menus.
+            while ($line =~ m/add\([0-9]+\s*,\s*[0-9]+\s*,\s*\".+?\"\s*,\s*\"(.+?)\"/g) {
+                push @files, $1;
+                push @counts, $count;
+            }
+            while ($line =~ m/url\('(.+?)'\)/g) {
+                push @files, $1;
+                push @counts, $count;
+            }
+            if ($line =~ m!MTMSSHREF(\s*)=(\s*)\"(.+?)\"!) {
+                push @files, $3;
+                push @counts, $count;
+            }
+            if ($line =~ m!MTMenuImageDirectory(\s*)=(\s*)\"(.+?)\"!) {
+                push @files, $3;
+                push @counts, $count;
+            }
+            $count++;
+        }
+        close HTML_FILE;
+    }
+    # Traverse linked files
+    my $count_nr = 0;
+    foreach my $file (@files) {
+        $count = $counts[$count_nr++];
+        if ($file =~ m!^$!) {
+            # skipping empty file
+        }
+        elsif ($file =~ m!^#!) {
+            # skipping bookmark
+        }
+        elsif ($file =~ m!(:|\+)!) {
+            # skipping link
+        }
+        else {
+            html_tree("$html_dir/$file", $html_file, $count);
+        }
+    }
+}
+
+sub skip_conditional {
+    my $currentlevel = shift;
+    my $level = $currentlevel;
+    my $gotend = 0;
+    while (my $line = <SCRIPT>) {
+        if ($line =~ m/^ifn?eq/) {
+            ++$level;
+        }
+        elsif ($line =~ m/^endif/) {
+            if ($level == $currentlevel) {
+                $gotend = 1;
+                last;
+            }
+            if ($level == 0) {
+                KreaTV::error("Unmatched endif");
+            }
+            --$level;
+        }
+    }
+    if ($gotend == 0) {
+        KreaTV::error("Missing endif");
+    }
+}
+
+# Parameters
+
+my ($script, %var);
+while (my $arg = shift) {
+    for ($arg) {
+        if (/^--source$/) {
+            $source = shift;
+            $var{"source"} = $source;
+        }
+        elsif (/^--dest$/) {
+            $dest = shift;
+            $var{"dest"} = $dest;
+        }
+        elsif (/^--target$/) {
+            KreaTV::error("$arg not yet supported");
+        }
+        elsif (/^--depname$/) {
+            $depend_name = shift;
+        }
+        elsif (/^--depfile$/) {
+            $depend_file = shift;
+        }
+        elsif (/^--script$/) {
+            $script = shift;
+        }
+        elsif (/^--var$/) {
+            my $name = shift;
+            $var{$name} = shift;
+        }
+        else {
+            KreaTV::error("Unknown option: $arg");
+        }
+    }
+}
+
+
+if ($depend_file) {
+    KreaTV::system("rm -f $depend_file");
+    # Make sure the depend file always will be present since it's used by
+    # files such as build.mk
+    KreaTV::system("touch $depend_file");
+}
+
+open(SCRIPT, "< $script") or die "Could not open script file $script: $!";
+
+my $in_conditional = 0;
+
+while (my $line = <SCRIPT>) {
+    my $original_line = $line;
+
+    while ($line =~ m/\$(\w+)/) {
+        my $name = $1;
+        if (!defined($var{$name})) {
+            KreaTV::error("Undefined variable: \"\$$name\"");
+        }
+        $line =~ s/\$\Q$name/$var{$name}/g;
+    }
+
+    if ($line eq "\n") {
+        # Empty line, ignore it
+    }
+    elsif ($line =~ m/^\s*\#/) {
+        # Comment, ignore it
+    }
+    elsif ($line =~ m/^\s*mkdir\((.+)\)/) {
+        my $dir = $1;
+        print "Create dir $dir\n" if ($verbose);
+        KreaTV::system("mkdir -p $dest/$dir");
+    }
+    elsif ($line =~ m/^\s*copy\((.+),(.+)\)/) {
+        my $from = $1;
+        my $to = $2;
+        # Strip spaces
+        $from =~ s/^\s+//;
+        $from =~ s/\s+$//;
+        # Strip spaces
+        $to =~ s/^\s+//;
+        $to =~ s/\s+$//;
+        print "Copy $from to $to\n" if ($verbose);
+        # Add to paths if needed
+        if (! ($from =~ m!^/!)) {
+            $from = "$source/$from";
+        }
+        if (! ($to =~ m!^/!)) {
+            $to = "$dest/$to";
+        }
+        my @files = qx{find -L $from -type f 2>/dev/null};
+        if (@files == 0) {
+            KreaTV::error("No match for $from");
+        }
+        print_depends(@files);
+        KreaTV::system("cp -a $from $to");
+    }
+    elsif ($line =~ m/^\s*link\((.+),(.+)\)/) {
+        my $from = $1;
+        my $to = $2;
+        # Strip spaces
+        $from =~ s/^\s+//;
+        $from =~ s/\s+$//;
+        # Strip spaces
+        $to =~ s/^\s+//;
+        $to =~ s/\s+$//;
+        print "Link $to -> $from\n" if ($verbose);
+        # Add to path if needed
+        if (! ($to =~ m!^/!)) {
+            $to = "$dest/$to";
+        }
+        KreaTV::system("ln -s $from $to");
+    }
+    elsif ($line =~ m/^\s*system\((.+)\)/) {
+        my $cmd = $1;
+        print "system: $cmd\n" if ($verbose);
+        KreaTV::system($cmd);
+    }
+    elsif ($line =~ m/^\s*echo\((.+)\)/) {
+        my $str = $1;
+        print "$str\n" if ($verbose);
+    }
+    elsif ($line =~ m/^\s*remove\((.+)\)/) {
+        my $file = $1;
+        print "Delete $file\n" if ($verbose);
+        KreaTV::system("rm -rf $dest/$file");
+    }
+    elsif ($line =~ m/^\s*clean_dest\(\)/) {
+        print "Clean destination\n" if ($verbose);
+        KreaTV::system("rm -rf $dest");
+        KreaTV::system("mkdir -p $dest");
+    }
+    elsif ($line =~ m/^\s*ignore_html\((.+)\)/) {
+        my $ignore_path = "$source/$1";
+        $ignore_html{$ignore_path} = 1;
+    }
+    elsif ($line =~ m/^\s*html_tree\((.+)\)/) {
+        my $from_file = $1;
+        # Strip spaces
+        $from_file =~ s/^\s+//;
+        $from_file =~ s/\s+$//;
+        print "Copy html tree $from_file\n" if ($verbose);
+        html_tree("$source/$from_file", "$from_file", 0);
+    }
+    elsif ($line =~ m/^\s*ifeq\((.+),(.+)\)/) {
+        if ($in_conditional == 1) {
+            KreaTV::error("Nested conditionals not allowed");
+        }
+
+        if ($1 ne $2) {
+            # Does not match, skip
+            skip_conditional($in_conditional);
+        }
+        else {
+            ++$in_conditional;
+        }
+    }
+    elsif ($line =~ m/^\s*ifneq\((.+),(.+)\)/) {
+        if ($in_conditional == 1) {
+            KreaTV::error("Nested conditionals not allowed");
+        }
+
+        if ($1 eq $2) {
+            skip_conditional($in_conditional);
+        }
+        else {
+            ++$in_conditional;
+        }
+    }
+    elsif ($line =~ m/^\s*endif/) {
+        if ($in_conditional == 0) {
+            KreaTV::error("Unmatched endif");
+        }
+
+        --$in_conditional;
+    }
+    else {
+        # Shouldn't end up here!
+        KreaTV::error("Unknown command: $original_line");
+    }
+}
+if ($in_conditional != 0) {
+    KreaTV::error("Missing endif");
+}
+close SCRIPT;
+
+my @license_files = `${FindBin::Bin}/install_licenses $dest/usr/share/license`;
+for (@license_files) {
+    chomp $_;
+    print_depends($_);
+}

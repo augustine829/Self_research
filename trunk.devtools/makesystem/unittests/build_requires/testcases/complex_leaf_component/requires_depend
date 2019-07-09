@@ -1,0 +1,16 @@
+.requires: source_dir/b/Makefile
+
+source_dir/b/Makefile:
+
+.requires: source_dir/a/ab/Makefile
+
+source_dir/a/ab/Makefile:
+
+.requires: source_dir/a/aa/Makefile
+
+source_dir/a/aa/Makefile:
+
+.requires_setup: source_dir/b/Makefile
+
+.requires_setup: source_dir/a/ab/Makefile
+

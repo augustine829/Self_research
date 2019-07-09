@@ -1,0 +1,23 @@
+#!/bin/sh
+
+# Parameters
+__command=$0
+__dir=$1
+shift
+__class=$1
+shift
+# The rest of the parameters are passed on to html_meta_filter
+
+__bin_path=${__command%/*}
+
+if [ $__class = "public" ]; then
+    __allowed="--allowed public"
+elif [ $__class = "under_nda" ]; then
+    __allowed="--allowed public --allowed under_nda"
+elif [ $__class = "confidential" ]; then
+    __allowed="--allowed public --allowed under_nda --allowed confidential --allowed internal"
+elif [ $__class = "internal" ]; then
+    __allowed="--allowed public --allowed internal"
+fi
+
+$__bin_path/html_meta_filter --dir $__dir --meta KreaTV.SecurityClass $__allowed --default confidential $@

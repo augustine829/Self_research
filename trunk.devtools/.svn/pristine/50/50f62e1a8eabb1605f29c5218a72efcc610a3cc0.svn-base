@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+
+from optparse import OptionParser
+from os.path import dirname, realpath
+import os
+import string
+import sys
+
+sys.path.insert(0, dirname(realpath(__file__)) + "/../lib/3pplicense")
+import threepplicense
+
+def cmd2lines(cmd):
+        return [line.strip() for line in os.popen(cmd).readlines()]
+
+def get_breffile_sha1(filename):
+    for e in map(lambda a: string.split(a, '='), open(filename).readlines(4)):
+        if e[0].strip() == 'sha1':
+            return e[1].strip()
+    return None
+
+def verify_3pplicense(dirname, filename):
+    threepp = threepplicense.parse(filename)
+    full_FILENAME = (
+        'FILENAME' in threepp and dirname + '/' + threepp['FILENAME'])
+    breffile = None
+    if 'FILENAME' in threepp and not os.path.exists(full_FILENAME):
+        breffile = full_FILENAME + '.bref'
+        if not os.path.exists(breffile):
+            print filename + ' file ' + threepp['FILENAME'] + ' does not exist'
+            return
+
+    if 'FILENAME' in threepp and 'SHA1' in threepp:
+        if not breffile:
+            (sha1, dum) = cmd2lines('sha1sum ' + full_FILENAME)[0].split()
+        else:
+            sha1 = get_breffile_sha1(breffile)
+        if sha1 != threepp['SHA1']:
+            print (filename + ' SHA1SUM does not match. Got SHA1SUM='
+                   + threepp['SHA1'] + ' while `sha1sum '
+                   + threepp['FILENAME'] + '` yields ' + sha1)
+
+
+def on_walk(arg, dirname, names):
+    # skip .svn/ and dist/ directories
+    if dirname.endswith('/.svn') or dirname.endswith('/dist'):
+        return
+    for idx, file in enumerate(names):
+        if file == '.svn' or file == 'dist':
+            del names[idx]
+            continue
+
+    dirs = os.path.abspath(dirname).split(os.sep)
+    if len(dirs) > 2 and dirs[-2] == '3pp':
+        filename = dirname + "/3PPLICENSE"
+        if not os.path.exists(filename):
+            print dirname + " lacks 3PPLICENSE"
+        else:
+            verify_3pplicense(dirname, filename)
+    else:
+        if "3PPLICENSE" in names:
+            verify_3pplicense(dirname, dirname + "/3PPLICENSE")
+
+root = '.'
+
+parser = OptionParser("usage: %prog [BRANCHPATH]")
+
+(options, args) = parser.parse_args()
+
+if len(args) > 1:
+    parser.print_help()
+    exit(1)
+if len(args) == 1:
+    root = args[0]
+
+os.path.walk(root, on_walk, None)

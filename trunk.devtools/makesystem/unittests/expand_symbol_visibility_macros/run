@@ -1,0 +1,14 @@
+#!/bin/sh
+
+cd $(dirname $0)
+rm -rf tmp_dir
+mkdir -p tmp_dir
+cp ITest.h tmp_dir/
+../../expand_symbol_visibility_macros tmp_dir
+r="[  PASSED  ]"
+e=0
+
+diff -u expected.h tmp_dir/ITest.h || { r="[  FAILED  ]"; e=1; }
+
+echo $r
+exit $e

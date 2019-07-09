@@ -1,0 +1,24 @@
+#!/bin/bash
+# Script which makes box boot with a nfs filesystem
+# Environment variables used:
+#   TFTPHOST, which server to put images on
+#   STBMODEL, The model to use (19x3, 28x3, 29x2...)
+#   REMOTEUSER, the user id in TFTPHOST (default is $USER)
+
+TOOLDIR=$(dirname $(which $0))
+${TOOLDIR}/_checkenv -m -t || exit 1
+
+. ${TOOLDIR}/_setremoteuser
+
+model=$STBMODEL
+if [ "$1" = "-m" ]; then
+    ### If -m is specified, read model.
+    ### Possible values are: 19x3, 28x3, 29x2..."
+    shift
+    arch=$($TOOLDIR/_getarch $1) || exit 1
+    model=$1
+    shift
+fi
+
+echo "Now using NFS for VIP$model."
+ssh ${REMOTEUSER}@${TFTPHOST} "cd /tftpboot && ln -sf ${REMOTEUSER}/vip$model/kernel-nfs ${REMOTEUSER}-vip$model"

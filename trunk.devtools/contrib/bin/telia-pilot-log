@@ -1,0 +1,41 @@
+#!/bin/sh
+
+set -eu
+
+if [ $# -lt 1 -o $# -gt 2 -o "${1:-}" = "-h" -o "${1:-}" = "--help" ]; then
+    echo "Usage: $0 USERNAME [DATE]"
+    echo "  USERNAME  the 10 digit user id"
+    echo "  DATE      the date on the form YYYYMMDD (default is today)"
+    echo "Fetches the log for USERNAME on the given DATE."
+    exit 1
+fi
+
+# Script parameters
+username="$1"
+date="$(date -d ${2:-now} +%Y%m%d)"
+
+# Base URL
+URL="http://tvhome.telia.com:8080"
+
+# HTTP parameters
+remotelog=$(date -d "TZ=\"CET\" $date" +STBlog_%Y%m%d_%z.gz | sed -e 's/\+//')
+rawlog="${username}_$date.log"
+
+if [ -e "$rawlog" ]; then
+  echo "Error: the log '$rawlog' already exists - remove and try again" >&2
+  exit 1
+fi
+
+# Generate the log on the server
+curl -F "user=$username" -F "remotelog=$remotelog" \
+    -F "data=@/dev/null;filename=" -o /dev/null "$URL/upload"
+
+# Fetch log
+curl --remote-name "$URL/raw/$rawlog"
+
+if [ ! -e "$rawlog" ]; then
+  echo "Error: the log could not be downloaded" >&2
+  exit 1
+fi
+
+echo "Log saved as $rawlog"

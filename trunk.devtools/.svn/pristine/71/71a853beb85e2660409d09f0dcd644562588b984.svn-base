@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+# Description
+# ===========
+#
+# This wrapper script improves the standard SVN client in different ways:
+#
+# * Rewrites output of "svn blame" and "svn log" to display full user names
+#   instead of only core ID.
+# * Colorizes output of "svn diff", "svn log" and "svn status", similar to what
+#   git does.
+# * Pipes output of "svn blame", "svn cat", "svn diff" and "svn log" to the
+#   pager (by default "/usr/bin/less -R"), similar to what git does.
+#
+#
+# Installation instructions
+# =========================
+#
+# Alternative 1: Make a symlink named svn to prettysvn somewhere in your PATH,
+# for instance:
+#
+#   ln -s ~tools/bin/prettysvn ~/bin/svn
+#
+# Alternative 2: Set up a shell alias:
+#
+#   alias svn=prettysvn
+#
+# The drawback of alternative 2 is that prettysvn then won't be used for
+# instance in Emacs's vc-mode or when running things like
+#
+#    find -name '*.cpp' | xargs svn diff
+#
+# Read more on
+# <http://kreatvwiki.arrisi.com/KreaTV/ShellConfiguration#Adding_an_alias>.
+#
+#
+# Usage together with other SVN wrappers
+# ======================================
+#
+# prettysvn by default executes /usr/bin/svn to perform the underlying
+# operation. If you want to use another SVN binary or SVN wrapper, set the
+# environment variable PRETTYSVN_REAL_SVN to the SVN program of choice, for
+# instance "svn-mirror-fallback".
+
+import os
+import sys
+
+from os.path import dirname, realpath
+
+lib_dir = dirname(dirname(realpath(__file__))) + "/lib/prettysvn"
+paged_commands = [
+    "ann", "annotate", "blame", "praise",
+    "cat",
+    "di", "diff",
+    "log",
+]
+
+
+def get_command_from_args(args):
+    # Doesn't work for e.g. "svn --username foo status", but such cases
+    # shouldn't be common so let's ignore the problem.
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-"):
+            return arg
+    return None
+
+
+def prettify(args, command):
+    args.append("| {0}/prettify {1} {2}".format(lib_dir, command,
+                                                sys.stdout.isatty()))
+
+
+def main():
+    real_svn = os.environ.get("PRETTYSVN_REAL_SVN", "/usr/bin/svn")
+    args = sys.argv[1:]
+    command = get_command_from_args(args)
+
+    if command in ["ann", "annotate", "blame", "praise"]:
+        prettify(args, "blame")
+    elif command in ["di", "diff"]:
+        prettify(args, "diff")
+    elif command == "log":
+        prettify(args, "log")
+    elif command in ["st", "stat", "status"]:
+        prettify(args, "status")
+    if sys.stdout.isatty() and command in paged_commands:
+        pager = os.environ.get("PAGER", "/usr/bin/less -R")
+        args += ["|", pager]
+
+    if args == sys.argv[1:]:
+        exec_args = [real_svn] + args
+    else:
+        exec_args = ["sh", "-c", " ".join([real_svn] + args)]
+    os.execvp(exec_args[0], exec_args)
+
+
+main()

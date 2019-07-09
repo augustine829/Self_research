@@ -1,0 +1,240 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use File::Path;
+
+use strict;
+use warnings FATAL => 'all';
+
+use KreaTV;
+
+# .sandbox contains links to files distributed by components that are
+# (recursively) required by the current component.
+
+# By limiting INCPATH or LIBPATH to the sandbox, the current component is only
+# exposed to the parts of the dist directory that are guaranteed to be there
+# because of the requires.
+
+# build_sandbox builds a sandbox in two modes:
+
+# (1) .requires_list
+#     In this mode, it creates links to disted files
+#     of required dependencies.
+
+#     For library files(*.so|*.so.*|*.a|*.a.*),
+#     it creates hard links to the files.
+
+#     For other types of files, it creates symbol links
+#     to the directories holding the files.
+
+#     If parameter use_full_sandbox is false,
+#     only library files are linked into sandbox.
+
+# (2) self_exported_headers
+#     In this mode, it creates symbol link to header directory
+#     distributed by the current building component itself.
+
+
+# Global variables
+my $bsg_src;
+my $sandbox_dir = ".sandbox";
+my $requires_list_file = ".requires_list";
+my $option = "";
+my $component_name = "";
+my $use_full_sandbox = 0;
+my $debug_mode = 0;
+
+sub print_progress {
+    my $msg = shift;
+    printf("  SANDBOX     %-30s %s", $component_name, $msg);
+}
+
+sub is_library_file {
+    my $file = shift;
+    if ($file =~ /\.(so|a)(\..*)?$/) {
+        return 1;
+    }
+    return 0;
+}
+
+sub parse_path {
+    my $path = shift;
+    my ($dir, $file) = ("", "");
+    if ($path =~ /^(\S*[^\/])*\/+(\S*[^\/])?$/) {
+        $dir = $1 if defined $1;
+        $file = $2 if defined $2;
+    }
+    else {
+        $file = $path;
+    }
+    return ($dir, $file);
+}
+
+sub exists_in_sandbox {
+    my $path = shift;
+    if (-l "$sandbox_dir/$path") {
+        return 1;
+    }
+    # Return 1 if any directory in the path
+    # is already symlink:ed in sandbox_dir.
+    my ($dir, $file) = parse_path($path);
+    while ($dir ne "") {
+        if (-l "$sandbox_dir/$dir") {
+            return 1;
+        }
+        ($dir, $file) = parse_path($dir);
+    }
+    return 0;
+}
+
+sub create_dir {
+    my $path = shift;
+    if (! -e $path) {
+        if (-l $path) {
+            #Remove $path linking to something non-existing
+            unlink($path);
+        }
+        mkpath($path, 0, 0777);
+    }
+}
+
+sub create_symlink {
+    my $target = shift;
+    my $symlink = shift;
+
+    if (! -l $symlink) {
+        if (-d $symlink) {
+            rmtree($symlink, 0, 1);
+        }
+        if (!symlink($target, $symlink)) {
+            die "Error: Failed to create symlink to $target: $!";
+        }
+    }
+}
+
+sub add_file_to_sandbox {
+    my $path = shift;
+
+    if (!$use_full_sandbox && !is_library_file($path)) {
+        return;
+    }
+    if ($use_full_sandbox && exists_in_sandbox($path)) {
+        return;
+    }
+    my ($dir, $file) = parse_path($path);
+    if ($file ne "") {
+        # Create hard link for each library file. Only create symlink to
+        # upper-level directory for files in other types when use_full_sandbox
+        # is true.
+        my $dest_dir = "";
+        my $target = "";
+        my $link_name = "";
+        if (is_library_file($file)) {
+            $dest_dir = "$sandbox_dir/$dir";
+            $target = "$bsg_src/dist/$dir/$file";
+            $link_name = "$sandbox_dir/$dir/$file";
+            create_dir($dest_dir);
+            link($target, $link_name);
+        }
+        elsif ($use_full_sandbox) {
+            my ($parent_dir, $sub_dir) = parse_path($dir);
+            $dest_dir = "$sandbox_dir/$parent_dir";
+            $target = "$bsg_src/dist/$parent_dir/$sub_dir";
+            if ($parent_dir eq "" && $sub_dir eq "") {
+                $link_name = "$sandbox_dir/$file";
+            }
+            else {
+                $link_name = "$sandbox_dir/$parent_dir/$sub_dir";
+            }
+            create_dir($dest_dir);
+            create_symlink($target, $link_name);
+        }
+    }
+}
+
+sub add_self_exported_headers_to_sandbox {
+    my @args = @_;
+    my $path = $args[0];
+    if ($path !~ m!^\S+dist\/(\S+[^\/])\/*$!g) {
+        die "Error: Invalid path: $path";
+        return;
+    }
+    my $dir = $1 if defined $1;
+    if ($use_full_sandbox && exists_in_sandbox($dir)) {
+        return;
+    }
+    for (1..$#args) {
+        my $file = $args[$_];
+        if ($file =~ /^\S+\/(\S+)/g) {
+            $file = $1;
+        }
+        add_file_to_sandbox("$dir/$file");
+    }
+}
+
+
+sub add_dist_files_to_sandbox {
+    my $dependency = shift;
+    my $slashless_name = $dependency;
+    $slashless_name =~ s/_/__/g;
+    $slashless_name =~ s/\//_/g;
+    my $distfile = "$bsg_src/dist/distfiles/$slashless_name.dist";
+    open DISTFILE, $distfile
+        or die "Error: Required component $dependency has not been built (failed to open $distfile: $!)";
+    while (<DISTFILE>) {
+        my $path = "";
+        if (/^(\S+)\s/) {
+            $path = $1 if defined $1;
+        }
+        add_file_to_sandbox($path);
+    }
+    close DISTFILE;
+}
+
+sub add_requires_to_sandbox {
+    my $start_time = time();
+    open FH, $requires_list_file
+        or die "Error: Failed to open $requires_list_file: $!";
+    while (<FH>) {
+        $_ =~ /^(\S+)\s/g;
+        add_dist_files_to_sandbox($1);
+    }
+    close FH;
+    if ($debug_mode) {
+        my $duration = time() - $start_time;
+        print_progress("### Time usage: $duration seconds\n");
+        print_progress("### Disk usage: ");
+        if (-d ".sandbox") {
+            KreaTV::system("du -sh .sandbox");
+        }
+        else {
+            print "0 bytes\n";
+        }
+    }
+}
+
+# Setup $bsg_src
+if (! defined $ENV{BSG_SRC_ABS} || $ENV{BSG_SRC_ABS} eq "") {
+    die "Error: BSG_SRC_ABS must be set";
+}
+else {
+    $bsg_src = $ENV{BSG_SRC_ABS};
+}
+
+# Get input from command line
+
+$component_name = $ARGV[0];
+$option = $ARGV[1];
+if ($option eq "self_exported_headers" && $#ARGV > 2) {
+    $use_full_sandbox = 1;
+    add_self_exported_headers_to_sandbox(@ARGV[2..$#ARGV]);
+}
+elsif ($option eq $requires_list_file) {
+    if ($#ARGV > 1 && $ARGV[2] ne "") {
+        $use_full_sandbox = 1;
+    }
+    add_requires_to_sandbox();
+}
+

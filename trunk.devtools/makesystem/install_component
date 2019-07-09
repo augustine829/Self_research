@@ -1,0 +1,118 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => 'all';
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
+use File::Path qw(mkpath);
+use Getopt::Long qw(GetOptions);
+
+use KreaTV;
+
+my $toolchain = "";
+my $device = "";
+my $flavour = "";
+
+my $exclude = "";
+my $include = "";
+
+sub string_match {
+    my ($actual, $filter) = @_;
+    # The empty string means "don't care" or "match any".
+    return ($actual eq "" || $filter eq "" || $actual eq $filter);
+}
+
+sub inc_excl_match {
+    my ($file) = @_;
+    return (($include eq "" || $file =~ /$include/)
+            && ($exclude eq "" || $file !~ /$exclude/));
+}
+
+my $ok = GetOptions("exclude=s" => \$exclude,
+                    "flavour=s" => \$flavour,
+                    "include=s" => \$include,
+                    "device=s" => \$device,
+                    "toolchain=s" => \$toolchain);
+if (!$ok || @ARGV != 2) {
+    print STDERR <<EOF;
+Usage: install_component [options] <component> <destination directory>
+
+This program copies the files disted by a component into a destination
+directory (created if needed).
+
+Options:
+  --exclude=<regexp>       Only copy files that do not match <regexp>.
+  --flavour=<flavour>      Only copy files that were built for flavour
+                           <flavour> or with unspecified flavour.
+  --include=<regexp>       Only copy files that match <regexp>.
+  --device=<device>        Only copy files that were built for device <device>
+                           or with unspecified device.
+  --toolchain=<toolchain>  Only copy files that were built for toolchain
+                           <toolchain> or with unspecified toolchain.
+EOF
+    exit(1);
+}
+
+my $component = $ARGV[0];
+my $dest_dir = $ARGV[1];
+my $root = $ENV{BSG_SRC_ABS};
+my $verbose = $ENV{VERBOSE};
+unless (defined($root)) {
+    die "Error: Please set BSG_SRC_ABS to the BSG root directory";
+}
+
+my $dist_name = $component;
+$dist_name =~ s!_!__!g;
+$dist_name =~ s!/!_!g;
+my $dist_file = "$root/dist/distfiles/$dist_name.dist";
+
+unless (-f $dist_file) {
+    die "Error: Couldn't find $dist_file -- component $component hasn't been built";
+}
+
+open my $fh, "<", $dist_file;
+my @files_to_install;
+foreach my $row (<$fh>) {
+    chomp $row;
+    my ($path, $info_string) = split(/ /, $row, 2);
+    my %info = map {split(/=/, $_)} split(/ /, $info_string);
+    $info{toolchain} ||= "";
+    $info{device} ||= "";
+    $info{flavour} ||= "";
+
+    if ($path !~ m!^(debug|distfiles|deps)/!
+            && $path !~ m!\.iip\.iipinfo$!
+            && inc_excl_match($path)
+            && (string_match($info{toolchain}, $toolchain)
+                || $info{toolchain} eq "noarch"
+                || $info{toolchain} eq "stb-noarch")
+            && string_match($info{device}, $device)
+            && string_match($info{flavour}, $flavour)) {
+        push(@files_to_install, $path);
+    }
+}
+close $fh;
+
+mkpath($dest_dir);
+my $abs_dest_dir = abs_path($dest_dir) or die "abs_path: $!";
+chdir("$root/dist") or die "chdir: $!";
+
+# To improve performance, multiple source files are passed to the external cp
+# command each time. (Perl's File::Copy module can't be used since it doesn't
+# copy attributes/permissions properly.)
+my $batch_size = 1000;
+for (my $i = 0; $i < @files_to_install; $i += $batch_size) {
+    my @source_paths;
+    for (my $j = $i; $j < $i + $batch_size && $j < @files_to_install; ++$j) {
+        my $source_path = $files_to_install[$j];
+        print "Copying $root/dist/$source_path to $dest_dir/$source_path\n"
+            if $verbose;
+        push(@source_paths, $source_path);
+    }
+    KreaTV::system("cp -t $abs_dest_dir --parents -af "
+                   . join(" ", @source_paths));
+}

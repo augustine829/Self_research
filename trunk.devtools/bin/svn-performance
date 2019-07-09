@@ -1,0 +1,217 @@
+#!/bin/bash
+
+set -eu
+
+usage() {
+   cat <<EOF
+Usage:
+  svn-performance [options]
+
+  Running script with no options specified runs all tests. You can run this
+  script with one or several arguments.
+
+  Options:
+   --checkout-and-update              -cu  Check out trunk and update
+   --checkout-and-update-from-mirror  -cm  Same but from SVN mirror
+   --rebase                           -r   Check out and rebase
+   --rebase-using-remote-svn          -rr  Same but using remotesvn
+EOF
+}
+
+log() {
+    text=$1
+
+    # Check if $2 is not set:
+    if [ -z ${2+x} ];then
+        echo -e "$text" >> $output
+    else
+        command=$2
+
+        echo $command
+
+        echo -e "$text: $($command)" >> $output
+    fi
+}
+
+logcmd() {
+    cmd=$1
+    echo -e "$cmd: $($cmd)" >> $output
+}
+
+doyourthing() {
+    repo="http://svn.arrisi.com/dev"
+    svn="/usr/bin/svn"
+    pwd=`pwd`
+    output="$(pwd)/svn-performance.txt"
+    time="/usr/bin/time -f %e -o $output -a"
+    echo -e "svn-performance output\n======================\n" > $output
+
+    logcmd "date"
+    logcmd "hostname"
+    logcmd "svn --version --quiet"
+
+    command -v remotesvn >/dev/null 2>&1 || { echo >&2 "I require remotesvn but it's not installed. Make sure you get it: http://kreatvwiki.arrisi.com/KreaTV/DevelopmentToolsAndScripts."; exit 1; }
+
+    answer=""
+    if [ -z ${SVNMIRROR+x} ]; then
+        log "SVNMIRROR variable is empty"
+        echo -n "Why is svn-mirror command not set up to work in your environment? "
+        read answer
+    else
+        log "SVNMIRROR variable: $SVNMIRROR"
+        command -v svn-mirror >/dev/null 2>&1 || { echo >&2 "I require svn-mirror but it's not installed. Make sure you get it: http://kreatvwiki.arrisi.com/KreaTV/DevelopmentToolsAndScripts."; exit 1; }
+    fi
+
+    echo -n "At which site/in which city are you located? "
+    read site
+    log "Site: $site"
+
+    tmpdir=`mktemp -d`
+    echo -e "Temporary directory is $tmpdir\nMake sure you remove it if you abort this command."
+    log "Temp dir: $tmpdir"
+    cd $tmpdir
+
+    ### Checking out and updating
+    if [ -n "$cu" ]; then
+        ((step+=1))
+        echo -e "Step $step/$nof_steps: Checking out trunk@268344..."
+        log "Time to checkout trunk: "
+        $time $svn co $repo/bsg/trunk@268344 > /dev/null
+
+        ((step+=1))
+        echo -e "Step $step/$nof_steps: Updating trunk to r270737..."
+        log "Time to update trunk: "
+        $time $svn up trunk -r 270737 > /dev/null
+
+        ((step+=1))
+        echo -e "Step $step/$nof_steps: Removing checked out trunk..."
+        rm -rf $tmpdir/trunk
+    fi
+
+    ### Checking out and updating using mirror
+    if [ -n "$cm" ]; then
+        if [ -z ${SVNMIRROR+x} ]; then
+            log "Why is svn-mirror not setup? $answer"
+            ((step+=3))
+        else
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Checking out trunk@268344 from mirror..."
+            log "Time to checkout trunk from mirror: "
+            $time svn-mirror co $repo/bsg/trunk@268344 > /dev/null
+
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Updating trunk to r270737 from mirror..."
+            log "Time to update trunk from mirror: "
+            $time svn-mirror up trunk -r 270737 > /dev/null
+
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Removing checked out trunk..."
+            rm -rf $tmpdir/trunk
+        fi
+    fi
+
+    ### Rebasing and committing
+    if [ -n "$r$rr" ]; then
+
+        ((step+=1))
+        echo -e "Step $step/$nof_steps: Checking out branch DEV_test_svn..."
+        log "Time to checkout branch DEV_test_svn: "
+        $time $svn co $repo/bsg/branches/DEV_test_svn > /dev/null
+
+        if [ -n "$r" ]; then
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Rebasing DEV_test_svn..."
+            log "Time to rebase DEV_test_svn: "
+            $time $svn merge -r 268344:270737 http://svn.arrisi.com/dev/bsg/trunk DEV_test_svn/ > /dev/null
+
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Committing rebase..."
+            log "Time to commit rebase of DEV_test_svn: "
+            $time $svn commit -m "Rebased" DEV_test_svn/ > /dev/null 2>&1 || { echo -e "Commit aborted as planned."; }
+
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Reverting and cleaning DEV_test_svn..."
+            $svn revert -R DEV_test_svn/ > /dev/null && svn-clean -f DEV_test_svn/ > /dev/null
+        fi
+
+        ### Rebasing and committing using remotesvn
+        if [ -n "$rr" ]; then
+
+            cd DEV_test_svn
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Rebasing DEV_test_svn using remotesvn..."
+            log "Time to rebase DEV_test_svn using remotesvn: "
+            $time remotesvn merge -r 268344:270737 $repo/bsg/trunk > /dev/null
+
+            ((step+=1))
+            echo -e "Step $step/$nof_steps: Committing rebase using remotesvn..."
+            log "Time to commit rebase of DEV_test_svn using remotesvn: "
+            $time remotesvn commit -m "Rebased" > /dev/null 2>&1 || { echo -e "Commit aborted as planned."; }
+            cd ..
+        fi
+        rm -rf $tmpdir/DEV_test_svn
+    fi
+    cd $pwd
+    echo -e "Output is in $output."
+
+    cat $output
+    rmdir $tmpdir
+}
+
+cu=
+cm=
+r=
+rr=
+step=0
+nof_steps=0
+num_args="$#"
+
+if [ $num_args = 0 ];then
+    # Run all commands by default.
+    cu=1
+    cm=1
+    r=1
+    rr=1
+    nof_steps=12
+else
+    i=0
+    while [ $i -lt $num_args ]; do
+        case $1 in
+            --checkout-and-update|-cu)
+                cu=1
+                ((nof_steps+=3))
+                ;;
+            --checkout-and-update-from-mirror|-cm)
+                cm=1
+                ((nof_steps+=3))
+                ;;
+            --rebase|-r)
+                r=1
+                if [ -z "$rr" ]; then
+                    ((nof_steps+=1))
+                fi
+                ((nof_steps+=3))
+                ;;
+            --rebase-using-remote-svn|-rr)
+                rr=1
+                if [ -z "$r" ]; then
+                    ((nof_steps+=1))
+                fi
+                ((nof_steps+=3))
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Error: Wrong argument."
+                usage
+                exit 1
+                ;;
+        esac
+        shift
+        i=$((i+1))
+    done
+fi
+
+doyourthing

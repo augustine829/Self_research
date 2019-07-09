@@ -1,0 +1,342 @@
+#!/usr/bin/python
+
+import os
+import re
+import shutil
+import sys
+import time
+from optparse import OptionParser
+from os.path import (
+    abspath, basename, dirname, expanduser, isdir, isfile, exists, join,
+    normpath)
+from subprocess import call, Popen, PIPE
+
+USAGE = """
+  %prog apply NAME                  Apply stashed changes
+  %prog drop NAME                   Drop (remove) stashed changes
+  %prog list                        List stashed changes
+  %prog pop NAME                    Same as "apply"
+  %prog rename OLD_NAME NEW_NAME    Rename stashed changes
+  %prog save NAME [PATH...]         Stash changes
+  %prog show NAME                   Show stashed changes
+
+WARNING: This tool may destroy your source code and eat your lunch. Use with
+care!
+
+svnstash makes it possible to temporarily undo changes in a Subversion working
+copy. It's similar to how "git stash" works. The "save" command basically runs
+"svn diff" to save local changes to a patch file with a given name, and the
+"apply"/"pop" command feeds that patch file to patch(1). svnstash knows how to
+handle file adds (svn add), file removes (svn rm) and file modifications. Other
+changes are not supported and will make svnstash refuse to run.
+
+When restoring changes, there may of course be conflicts. In that case,
+patch(1) will save the unappliable parts in *.rej files, which you then have to
+apply manually. (After a successful restore, the saved patch file is deleted.
+If there were conflicts, the patch file is kept and you have to "svnstash drop"
+it explicitly when you have applied the *.rej files.)
+
+The patch files are stored in <svn-top-dir>/.svn/svnstash/patches and also in
+~/.svnstash/backup.
+
+Known limitations:
+- Ignores changes to resources specified by svn:externals.
+- Doesn't handle added/removed directories.
+- Doesn't handle changes to Subversion properties.
+- Doesn't handle metadata about moves/renames.
+- Doesn't handle changes to binary files."""
+
+# ====================================================================
+# Helper functions.
+
+
+def error(message):
+    sys.stderr.write("%s: error: %s\n" % (basename(sys.argv[0]), message))
+    sys.exit(1)
+
+
+def progress(message):
+    sys.stdout.write(message + "\n")
+
+
+def ensure_directory_exists(dir):
+    if not isdir(dir):
+        os.makedirs(dir)
+
+
+def get_abs_paths(paths):
+    for path in paths:
+        yield abspath(path)
+
+
+def get_iso8601_timestamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def try_run(*args, **kwargs):
+    return call(*args, **kwargs)
+
+
+def run(*args):
+    retcode = call(*args)
+    if retcode != 0:
+        raise Exception("%r returned error code %d" % (args, retcode))
+
+
+def svn(*args):
+    args = ["svn"] + list(args)
+    p = Popen(args, stdout=PIPE)
+    (stdout, stderr) = p.communicate()
+    if p.returncode != 0:
+        raise Exception("%r returned error code %d" % (args, p.returncode))
+    return stdout
+
+
+def find_svn_top():
+    top = os.getcwd()
+    devnull = open("/dev/null", "w")
+    while try_run(["svn", "info", join(top, "..")], stdout=devnull,
+                  stderr=devnull) == 0:
+        top = join(top, "..")
+    if try_run(["svn", "info", top], stdout=devnull, stderr=devnull) != 0:
+        error("couldn't find WC top directory")
+    return normpath(top)
+
+
+def get_svn_status_map(paths):
+    m = {}
+    for line in svn("status", "--ignore-externals").splitlines():
+        (status, path) = line.split(None, 1)
+        m[path] = status
+    return m
+
+
+def get_svn_version():
+    output = svn("--version")
+    return tuple(int(x) for x in output.splitlines()[0].split()[2].split("."))
+
+
+def get_svn_status_columns():
+    if get_svn_version() >= (1, 6):
+        return 8
+    else:
+        return 7
+
+
+def get_svn_text_base(entry):
+    return \
+        join(dirname(entry), ".svn/text-base", basename(entry)) \
+        + ".svn-base"
+
+
+def check_args(op, args, number, atleast=False):
+    if atleast:
+        if len(args) < number:
+            op.error(
+                "expected at least %d argument%s, got %d" % (
+                    number, "" if number == 1 else "s", len(args)))
+    else:
+        if len(args) != number:
+            op.error(
+                "expected %d argument%s, got %d" % (
+                    number, "" if number == 1 else "s", len(args)))
+
+
+def check_supported_working_copy():
+    progress("Verifying working copy status...")
+
+    status_columns = get_svn_status_columns()
+    supported_status_regexp = \
+        re.compile("^[ ADIMRX?!]" + " " * (status_columns - 1))
+    for line in svn("status", "--ignore-externals").splitlines():
+        supported = True
+        entry = line[status_columns:]
+        if not supported_status_regexp.match(line):
+            supported = False
+        if line[0] == "A" and not isfile(entry):
+            # Added directory.
+            supported = False
+        if line[0] == "D" and not isfile(get_svn_text_base(entry)):
+            # Removed directory.
+            supported = False
+        if not supported:
+            error("unsupported working copy modification:\n%s" % line)
+
+
+def back_up_patch(patch_path):
+    backup_dir = expanduser("~/.svnstash/backup") + os.getcwd()
+    ensure_directory_exists(backup_dir)
+    backup_filename = "%s_%s_%d" % (
+        basename(patch_path),
+        get_iso8601_timestamp(),
+        os.getpid())
+    shutil.copy(patch_path, join(backup_dir, backup_filename))
+
+
+def patch_name_from_path(patch_path):
+    if patch_path.endswith(".patch"):
+        x = patch_path[:-6]
+    else:
+        x = patch_path
+    return basename(x)
+
+
+# ====================================================================
+# Commands.
+
+def cmd_delete(patch_path):
+    if not isfile(patch_path):
+        error("no previously saved changes named %r"
+              % patch_name_from_path(patch_path))
+
+    progress("Deleting %r..." % patch_name_from_path(patch_path))
+    os.remove(patch_path)
+    exit(0)
+
+
+def cmd_list(dir):
+    for f in sorted(os.listdir(dir)):
+        print patch_name_from_path(f)
+    exit(0)
+
+
+def cmd_rename(old_path, new_name):
+    if not isfile(old_path):
+        error("no previously saved changes named %r"
+              % patch_name_from_path(old_path))
+    new_path = join(dirname(old_path), new_name) + ".patch"
+    if exists(new_path):
+        error("%r already exists" % new_path)
+
+    progress("Renaming %r to %r..." % (patch_name_from_path(old_path),
+                                       new_name))
+    os.rename(old_path, new_path)
+    exit(0)
+
+
+def cmd_restore(patch_path):
+    if not isfile(patch_path):
+        error("no previously saved changes named %r"
+              % patch_name_from_path(patch_path))
+    check_supported_working_copy()
+
+    progress("Restoring %r..." % patch_name_from_path(patch_path))
+    patch = open(patch_path).read()
+    retcode = try_run(["patch", "-p0", "-i", patch_path])
+    for path in re.findall(r"(?m)^\+\+\+ (.+)\t\(added\)$", patch):
+        svn("add", path)
+    for path in re.findall(r"(?m)^\+\+\+ (.+)\t\(removed\)$", patch):
+        svn("remove", "--force", path)
+    if retcode == 0:
+        progress("Restore successful.")
+        os.remove(patch_path)
+    elif retcode == 1:
+        progress("""
+ERROR: Some changes could not be restored. You should now review the *.rej
+files mentioned above and manually reapply those changes, or perhaps manually
+revert the parts that actually were applied.""")
+    elif retcode == 2:
+        progress("")
+        progress("FAILURE: Read the messages above and take due action.")
+    exit(retcode)
+
+
+def cmd_save(patch_path, paths):
+    if exists(patch_path):
+        error("saved changes named %r already exist"
+              % patch_name_from_path(patch_path))
+    check_supported_working_copy()
+
+    progress("Saving %r..." % patch_name_from_path(patch_path))
+    patch = svn("diff", *paths)
+    if not patch:
+        error("no changes detected")
+
+    svn_status_map = get_svn_status_map(paths)
+
+    # Remember add/remove status so that cmd_restore can do the right thing.
+    for (path, status) in svn_status_map.iteritems():
+        if status == "A":
+            patch = re.sub(
+                r"(?m)^\+\+\+ (%s)\t.*$" % re.escape(path),
+                "+++ %s\t(added)" % path,
+                patch)
+        elif status == "D":
+            patch = re.sub(
+                r"(?m)^\+\+\+ (%s)\t.*$" % re.escape(path),
+                "+++ %s\t(removed)" % path,
+                patch,
+                re.MULTILINE)
+
+    with open(patch_path, "w") as fp:
+        fp.write(patch)
+    back_up_patch(patch_path)
+
+    # Revert changes.
+    if len(paths) == 0:
+        paths = ["."]
+    svn("revert", "-R", *paths)
+
+    # "svn revert" keeps added files in the file system, so remove them.
+    for (path, status) in svn_status_map.iteritems():
+        if status == "A":
+            os.remove(path)
+
+    exit(0)
+
+
+def cmd_view(patch_path):
+    if not isfile(patch_path):
+        error("no previously saved changes named %r"
+              % patch_name_from_path(patch_path))
+    sys.stdout.write(open(patch_path).read())
+    exit(0)
+
+
+# ====================================================================
+# Main.
+
+def main(argv):
+    op = OptionParser(usage=USAGE)
+    (options, args) = op.parse_args(argv[1:])
+
+    if not args:
+        op.error("you must choose a command")
+    command, args = args[0], args[1:]
+
+    svn_top = find_svn_top()
+    if svn_top is None:
+        error("you must run this command in an SVN working copy")
+    svnstash_patches_dir = join(svn_top, ".svn/svnstash/patches")
+    ensure_directory_exists(svnstash_patches_dir)
+
+    if command == "list":
+        check_args(op, args, 0)
+        cmd_list(svnstash_patches_dir)
+    else:
+        if command == "save":
+            args[1:] = [x[len(svn_top) + 1:] for x in get_abs_paths(args[1:])]
+        os.chdir(svn_top)
+        if len(args) > 0:
+            patch_name = args[0]
+            patch_path = join(svnstash_patches_dir, patch_name) + ".patch"
+        if command in ["apply", "pop"]:
+            check_args(op, args, 1)
+            cmd_restore(patch_path)
+        elif command == "drop":
+            check_args(op, args, 1)
+            cmd_delete(patch_path)
+        elif command == "rename":
+            check_args(op, args, 2)
+            new_name = args[1]
+            cmd_rename(patch_path, new_name)
+        elif command == "save":
+            check_args(op, args, 1, True)
+            cmd_save(patch_path, args[1:])
+        elif command == "show":
+            check_args(op, args, 1)
+            cmd_view(patch_path)
+        else:
+            op.error("Unknown command")
+
+exit(main(sys.argv))

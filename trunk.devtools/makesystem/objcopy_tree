@@ -1,0 +1,100 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => "all";
+use File::Basename qw(dirname);
+use File::Find qw(find);
+use File::Temp qw(tempfile);
+
+@ARGV == 3 or die "Usage: objcopy_tree <toolchain-objcopy> <path> <iip-file>";
+
+my $OBJCOPY = $ARGV[0];
+my $PATH = $ARGV[1];
+my $IIPFILE = $ARGV[2];
+
+my $toolchain = $ENV{"TOOLCHAIN"};
+my $device = $ENV{"DEVICE"} || "";
+my $flavour = $ENV{"FLAVOUR"} || "";
+my $bsgpath = $ENV{"BSG_SRC_ABS"};
+my $dist_targets = "$ENV{MAKESYSTEM}/dist_targets";
+my $verbose = $ENV{VERBOSE};
+
+my ($tempfd, $tempname);
+
+sub is_elf {
+    my ($file) = @_;
+
+    if (-f $file && ! -l $file) {
+        open my $fh, "<", $file or die "$file: $!";
+        read $fh, my $magic, 4;
+        close $fh;
+
+        if ($magic eq "\x7fELF") {
+            my $type = `file -b $file`;
+
+            if ($type =~ /ELF.*(executable|shared object)/) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+sub copy_debug_symbols {
+    my ($file, $output) = @_;
+
+    my @command1 = ($OBJCOPY, "--only-keep-debug", $file, $output);
+    my @command2 = ($OBJCOPY, "--add-gnu-debuglink=$output", $file);
+
+    print "Copying debug information of $file to $output\n" if $verbose;
+    system(@command1) == 0 or die "$file: $!";
+
+    print "Adding debug link from $output to $file\n" if $verbose;
+    if (system(@command2) != 0) {
+        print "Warning: can't add debug link from $output to $file\n";
+    }
+
+    return $output;
+}
+
+sub get_dist_path {
+    my ($path) = @_;
+
+    my $pos = index($path, "usr");
+    if ($pos < 0) {
+        $pos = index($path, "data") + 5;
+    }
+
+    my $root_path = substr($path, $pos);
+    my $iipdir = substr($IIPFILE, rindex($IIPFILE, "/") + 1);
+
+    return "debug/$iipdir/$root_path";
+}
+
+sub get_output_path {
+    my ($path) = @_;
+    return "$bsgpath/dist/" . get_dist_path($path);
+}
+
+sub objcopy {
+    my $file = $_;
+
+    return if ($file =~ m#lib/firmware/#);
+
+    if (is_elf($file)) {
+        my $new_file = "$file.debug";
+
+        copy_debug_symbols($file, $new_file);
+        my @command = ($dist_targets, "--rename",
+                       $new_file, get_output_path($new_file));
+        system(@command) == 0 or die "$!";
+        unlink($new_file);
+    }
+}
+
+($tempfd, $tempname) = tempfile("$ENV{COMPONENT_ROOT}/.dist.XXXXXX");
+
+if ($OBJCOPY ne ":" && $toolchain ne "host") {
+    find {wanted => \&objcopy, no_chdir => 1}, $PATH;
+}

@@ -1,0 +1,120 @@
+#!/bin/bash
+
+arg="$@"
+
+if [ -z "$arg" ]; then
+    echo "Usage:   $(basename $0) [-m model] <file 1> [file 2] [file 3...]"
+    echo "Example: $(basename $0) -m 19x3 appman libIpc.so"
+    echo
+    echo "This script replaces files in an unpacked rootdisk with files"
+    echo "from you current branch's dist directory."
+    echo
+    echo "Possible values of model are those recognized by _getarch."
+    echo "The STBMODEL environment variable is used if [-m model] is missing."
+    echo
+    echo "These environment variables should be set in order to get this script "
+    echo "to work:"
+    echo "BRANCH:   Is the branch you currently work on, e.g. DEV_cool_branch."
+    echo "CODEHOME: Points to where you have your branches, e.g."
+    echo "          /extra/$USER."
+    echo "ROOTHOST: Holds the server IP/name on which your NFS rootdisks"
+    echo "          can be found."
+    echo "NFSPATH:  Points to the path where your exported NFS rootdisks"
+    echo "          are, e.g. /extra/nfs_filesystems/$REMOTEUSER."
+    echo "STBHWMODEL: The toolchain (st40, bcm74xx, bcm15 or bcm45) for 4.x branches"
+    echo
+    echo "REMOTEUSER, the user id in TFTPHOST (default is $USER)"
+    echo
+    echo "The script assumes that your rootdisks in NFSPATH are put in "
+    echo "directories named corresponding to their model names, i.e."
+    echo "vip28x3/rootdisk, vip29x2/rootdisk and so on..."
+    exit
+fi
+
+TOOLDIR=$(dirname $(which $0))
+
+${TOOLDIR}/_checkenv -m -c -n -r || exit 1
+
+. ${TOOLDIR}/_fixmodel
+
+. ${TOOLDIR}/_setremoteuser
+
+path=$NFSPATH/$model/rootdisk/
+commands=""
+
+# 3.x style naming
+src_dir="$CODEHOME/$BRANCH/dist/$model"
+if [ ! -e $src_dir ]; then
+    # 4.x style
+    if [ -z "${STBHWMODEL}" ]; then
+	echo "Error: STBHWMODEL is not set! It should be bcm74xx, bcm15, bcm45 or st40." >&2
+	exit 1
+    fi
+    src_dir="$CODEHOME/$BRANCH/dist/$STBHWMODEL"
+fi
+
+for file in $@; do
+    file=$(basename $file)
+
+    ### Find the set of matching files in the rootdisk
+    dest_files=$(ssh -l $REMOTEUSER $ROOTHOST find $path -type f -name "$file")
+
+    ### Find a matching file in the dist
+    src_file=`find $src_dir -type f -name "$file"`
+
+    # Special handling of java files
+    if [ -z "$src_file" ]; then        
+        src_file=`find $CODEHOME/$BRANCH/dist/java -type f -name "$file"`
+    fi
+
+    if [ -z "$src_file" ]; then
+        echo "WARNING: File \"$file\" could not be found in dist..."
+        continue
+    fi
+
+    ### We can only use this script if we find one unique source file:
+    copies=""
+    for f in $src_file; do
+        copies="1$copies"
+    done
+    if [ "$copies" != "1" ]; then
+        echo "WARNING: Found multiple \"$file\" in dist, will not copy."
+        continue
+    fi
+
+    if [ -z "$dest_files" ]; then
+        echo "Could not find \"$file\" in rootdisk, type where in $ROOTHOST:$path" 
+        echo -n "Location of this file: "
+        read location
+        dest_files=${path}${location}/$file
+    fi
+    
+    for f in $dest_files; do
+	dests="$f $dests"
+        commands=" $commands ssh root@$ROOTHOST mv $f $f\_chmod_ref;"
+	commands=" $commands scp -p $src_file root@$ROOTHOST:$f;"
+        commands=" $commands ssh root@$ROOTHOST 'chmod --reference=$f\_chmod_ref $f; rm $f\_chmod_ref'"
+    done
+done
+
+if [ -n "$commands" ]; then
+
+    echo "Source directory is $src_dir."
+    echo "Before update:"
+    IFS=" "
+    for dest in $dests; do
+      ssh -l $REMOTEUSER @$ROOTHOST ls -al $dest 2> /dev/null
+    done
+    echo
+
+    echo "Copying..."
+    eval "$commands"
+    
+    echo -e "\nAfter update:"
+    IFS=" "
+    for dest in $dests; do
+      ssh -l $REMOTEUSER $ROOTHOST ls -al $dest
+    done
+else
+    echo "Nothing to do!"
+fi

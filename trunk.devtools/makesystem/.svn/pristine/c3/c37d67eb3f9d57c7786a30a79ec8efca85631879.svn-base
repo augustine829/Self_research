@@ -1,0 +1,639 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => 'all';
+
+my $boot_image_module_found = 1;
+eval {
+  require BootImage::Config;
+  BootImage::Config->import();
+};
+if ($@) {
+  $boot_image_module_found = 0;
+}
+
+use Cwd;
+use Cwd qw(abs_path);
+use File::Basename;
+use File::Temp;
+use Getopt::Long;
+use KreaTV;
+
+# Generates four output files
+#
+# .requires which is used for the dependencies between directories,
+# specified through REQUIRES=<component> in Makefiles.
+#
+# .requires_setup contains the linker setup necessary to use the
+# REQUIRED libs, ie it contains some LD_FLAGS.
+#
+# .requires_depend contains the dependencies for the .requires
+# file. The dependencies are all Makefiles of required components and
+# bootimage/kit configs connected with those. This means that updates
+# to REQUIRES in one of the Makefiles or updates to bootimage/kit
+# configs will force a rebuild of the .requires file, which is
+# good. But there is one case that will not work: When adding a
+# directory to a directory where the Makefile says REQUIRES=ALL_DIRS
+# the new directory will not be detected thus causing an outdated
+# .requires file.
+#
+# .requires_list contains a list of all dependent components, which is
+# collected recursively in the dependency tree.
+#
+
+# Global variables
+my (%all_requires, %all_oss_ignore, $makesystem_dir, $top_dir, %requires_depend, %requires_list, %skip_dirs);
+my ($requires_tmp, $requires_depend_tmp, $requires_list_tmp, $requires_setup_tmp);
+my %iip_info_cache; # "$component $is_kit" => {locations => \%locations,
+                    #                          depends => \%depends}
+my %config_file_iip_names; # config_file => [iip_names]
+my %config_file_included_configs; # config_file => [included configs (recursively)]
+my @iip_directories;
+my @mock_libs;
+
+sub error {
+    my ($message) = @_;
+    KreaTV::error("build_requires: $message");
+}
+
+sub requires_depend {
+    my $file = shift;
+
+    if (! exists $requires_depend{$file}) {
+        print $requires_depend_tmp ".requires: $file\n\n";
+        print $requires_depend_tmp "$file:\n\n";
+        $requires_depend{$file} = "";
+    }
+}
+
+sub record_dependency {
+    my $req = shift;
+
+    if (! exists $requires_list{$req}) {
+        print $requires_list_tmp "$req\n";
+        $requires_list{$req} = "";
+    }
+}
+
+sub read_requires {
+    my ($makefile, $requierer, $root_component) = @_;
+
+    # Add a dependency to the Makefile
+    requires_depend($makefile);
+
+    my %requires;
+    my %oss_ignore;
+    my $klibc_flag = 0;
+    my $mock_library = "none"; # none, first or last
+    open(MAKEFILE, $makefile)
+        or error "Could not open $makefile (required by $requierer): $!";
+    while (<MAKEFILE>) {
+        if (/^REQUIRES\s*\+?=\s*(\S+)/) {
+            if ($1 eq "ALL_DIRS") {
+                my $dirname = dirname($makefile);
+
+                opendir(DIR, "$dirname")
+                    or error "Could not open $dirname: $!";
+                my @dirs = grep { ! /^\./ && -d "$dirname/$_" && -f "$dirname/$_/Makefile" } readdir(DIR);
+                @dirs = sort @dirs;
+                closedir DIR;
+
+                foreach my $dir (@dirs) {
+                    requires_depend("$dirname/$dir/Makefile");
+                    "$dirname/$dir" =~ m!\Q$top_dir\E/(.+)!;
+                    $requires{$1} = "";
+                }
+            }
+            else {
+                $requires{$1} = "";
+
+                # Print a nice error message if the REQUIRES statement points
+                # to a missing directory
+                if (! -d "$top_dir/$1") {
+                    error "$makefile: required component '$1' not found";
+                }
+            }
+        }
+        elsif (/^(BOOT_IMAGE_CONFIG|KIT_CONFIG)\s*\+?=\s*(\S+)/) {
+            if (!$boot_image_module_found) {
+                error "can't import BootImage::Config, the variable",
+                  " '$1' is ignored.\n";
+            }
+
+            my $is_kit = ($1 eq "KIT_CONFIG");
+
+            my $config = dirname($makefile) . "/$2";
+            if (-f $config) {
+                my ($req, $included_configs) =
+                    read_requires_from_config_file($config, $is_kit);
+                @requires{keys %$req} = values %$req;
+                requires_depend($_) foreach (@$included_configs);
+                requires_depend($config);
+            }
+        }
+        elsif (/^OSS_IGNORE_COMPONENT\s*\+?=\s*(\S+)/) {
+            $oss_ignore{$1} = "";
+
+            # Print a nice error message if the OSS_IGNORE_COMPONENT statement points
+            # to a missing directory
+            if (! -d "$top_dir/$1") {
+                error "$makefile: OSS_IGNORE_COMPONENT '$1' not found";
+            }
+        }
+        elsif (/^USE_KLIBC.*/) {
+            $klibc_flag = 1;
+        }
+        elsif (/^(MOCKED_INTERFACE_HEADERS|RPC_COMPONENT|TOI_EXPORT_PATH)\s*\+?=\s*\S+/) {
+            # * An ordinary component produces a mock library when
+            #   MOCKED_INTERFACE_HEADERS is defined.
+            # * An internal RPC component (defining RPC_COMPONENT) always
+            #   produces a mock library.
+            # * A non-JS TOI component produces a mock library, and non-JS TOI
+            #   components always set TOI_EXPORT_PATH.
+            if ($1 eq "RPC_COMPONENT") {
+                # Add RPC_COMPONENT mock library first in the mock list because
+                # it may need symbols of a corresponding TOI component mock
+                # library (which is added last).
+                $mock_library = "first";
+            } else {
+                $mock_library = "last";
+            }
+        }
+    }
+    close MAKEFILE;
+
+    if ($mock_library ne "none" && !$root_component) {
+        dirname($makefile) =~ m!\Q$top_dir\E/(.+)!;
+        my $slashless_comp = $1;
+        $slashless_comp =~ s!_!__!g;
+        $slashless_comp =~ s!/!_!g;
+        my $libname = "mocks_${slashless_comp}";
+        if ($mock_library eq "first") {
+            unshift(@mock_libs, $libname);
+        } else {
+            push(@mock_libs, $libname);
+        }
+    }
+
+    return (\%requires, \%oss_ignore, $klibc_flag);
+}
+
+sub start_depend {
+    my $req = shift;
+
+    print $requires_tmp "$req:";
+}
+
+sub depend {
+    my $req = shift;
+
+    print $requires_tmp " $req";
+    record_dependency($req);
+}
+
+sub end_depend {
+    print $requires_tmp "\n\n";
+}
+
+sub find_path_cycle {
+    my ($req, $path) = @_;
+    my @cycle;
+    if (grep {$_ eq $req} @$path) {
+        @cycle = (@$path, $req);
+        while ($cycle[0] ne $req) {
+            shift @cycle;
+        }
+    }
+    return @cycle;
+}
+
+sub read_umbrella_targets {
+    my ($file) = @_;
+    my %umbrella_targets;
+    open(my $fh, $file) or error "Could not open $file: $!";
+    while (<$fh>) {
+        if (/^# START OF UMBRELLA TARGETS/ .. /^# END OF UMBRELLA TARGETS/) {
+            next if /^#/;
+            my ($name, $defs) = /(\S+)\s*[+:]=\s*(.*)/;
+            my @defs = split(/\s+/, $defs);
+            push @{$umbrella_targets{$name}}, @defs;
+        }
+    }
+    close($fh);
+    return %umbrella_targets;
+}
+
+sub make_sub_requires {
+    my ($req, $path) = @_;
+
+    my @path_cycle = find_path_cycle($req, $path);
+    if (@path_cycle) {
+        error "Cycle in REQUIRES: " . join(" -> ", @path_cycle);
+    }
+
+    if (exists $all_requires{$req}) {
+        return;
+    }
+
+    push @$path, $req;
+
+    $all_requires{$req} = "";
+
+    # Read sub requires
+    my $makefile = "$top_dir/$req/Makefile";
+    my ($sub_requires_ref, $sub_oss_ignore_ref) =
+        read_requires($makefile, $path->[-2], 0);
+    if (scalar(%$sub_requires_ref)) {
+        my @sorted_sub_requires = sort(keys %$sub_requires_ref);
+
+        # Build dependencies for sub requires
+        start_depend($req);
+        foreach my $sub_req (@sorted_sub_requires) {
+            depend($sub_req);
+        }
+        end_depend();
+
+        # Make sub sub requires
+        foreach my $sub_req (@sorted_sub_requires) {
+            make_sub_requires($sub_req, $path);
+        }
+    }
+    if (scalar(%$sub_oss_ignore_ref)) {
+        @all_oss_ignore{keys %$sub_oss_ignore_ref} = values %$sub_oss_ignore_ref;
+    }
+
+    pop @$path;
+}
+
+# This function expects the second argument to be a reference
+sub requires_setup {
+    my $requires = shift;
+    my %umbrella_targets = read_umbrella_targets("$makesystem_dir/constants.mk");
+    my $default_klibc_flag = shift;
+    my $klibc_flag = $default_klibc_flag;
+
+    # target -> array-ref of interface libs
+    my %reqs;
+
+    # Put mock libs first, because they may need symbols from interfaces libs
+    # of required components.
+    if (scalar @mock_libs) {
+        push(@{$reqs{"\$(TARGET_NAME_TEST)"}}, @mock_libs)
+    }
+
+    foreach my $req (sort(keys %$requires)) {
+        my $makefile = "$top_dir/$req/Makefile";
+        print $requires_depend_tmp ".requires_setup: $makefile\n\n";
+        open(MAKEFILE2, $makefile) or error "Could not open $makefile: $!";
+        my @targets = ();
+        while (<MAKEFILE2>) {
+            if (/^COMPONENT_TARGETS\s*\+?=\s*\$\((\S+)\)/) {
+                if (exists $umbrella_targets{$1}) {
+                    push @targets, @{$umbrella_targets{$1}};
+                }
+                else {
+                    push @targets, "\$($1)";
+                }
+            }
+            # Match INTERFACE_LIBS+=<libs> or INTERFACE_LIBS_<target>+=<libs>
+            if (/^INTERFACE_LIBS(_\w+)?\s*\+?=(.*)/) {
+                my $itarget = $1;
+                my @libs = grep {$_ ne ""} split(/\s+/, $2);
+                if ($itarget) {
+                    $itarget = "TARGET_NAME" . $itarget;
+                    $itarget = '$(' . $itarget . ')';
+                }
+                foreach my $t ($itarget ? ($itarget) : @targets) {
+                    push(@{$reqs{$t}}, @libs);
+                }
+            }
+        }
+        close MAKEFILE2;
+    }
+
+    foreach (sort(keys %reqs)) {
+        print $requires_setup_tmp "\n# $_\n";
+        my $target = $_;
+
+        my $end = 0;
+        # Host is tricky: there are currently two variants and we need to
+        # make sure to only link with the correct variant. For convenience, it
+        # is assumed that test builds also include host libraries.
+        if (/TARGET_NAME_HOST\)/) {
+            print $requires_setup_tmp "ifeq (\$(TOOLCHAIN), \$(HOST_TOOLCHAIN_NAME))\n";
+            print $requires_setup_tmp "  ifneq (\$(filter \$(TARGET_NAME_HOST) \$(TARGET_NAME_TEST), \$(COMPONENT_TARGETS)),)\n";
+            $klibc_flag = 0;
+            $end = 1;
+        }
+        elsif (/TARGET_NAME_TEST\)/) {
+            print $requires_setup_tmp "ifeq (\$(TOOLCHAIN), \$(HOST_TOOLCHAIN_NAME))\n";
+            print $requires_setup_tmp "  ifeq (\$(filter $_, \$(COMPONENT_TARGETS)) \$(strip \$(BUILD_TEST)), $_ true)\n";
+            $klibc_flag = 0;
+            $end = 1;
+        }
+        else {
+            print $requires_setup_tmp "ifneq (\$(filter \$(TOOLCHAIN) \$(DEVICE), $_),)\n";
+            $klibc_flag = $default_klibc_flag;
+        }
+
+        if ($klibc_flag) {
+            print $requires_setup_tmp "ifeq (\$(USE_KLIBC),true)\n";
+            foreach (@{$reqs{$_}}) {
+                print $requires_setup_tmp ("  " x ($end + 1))  . "_auto_ldflags += -l$_\_klibc\n";
+            }
+            print $requires_setup_tmp "else\n";
+        }
+
+        foreach (@{$reqs{$_}}) {
+            print $requires_setup_tmp ("  " x ($end + 1))  . "_auto_ldflags += -l$_\n";
+        }
+
+        if ($klibc_flag) {
+            print $requires_setup_tmp "endif\n";
+        }
+
+        if ($end) {
+            print $requires_setup_tmp "  endif\n";
+        }
+        print $requires_setup_tmp "endif\n";
+    }
+}
+
+sub read_requires_from_config_file {
+    my ($filename, $is_kit) = @_;
+    $is_kit ||= 0;
+    my %locations;
+    my %depends;
+    my %res;
+
+    foreach my $dir (@iip_directories) {
+        my ($loc, $dep) = get_iip_info($dir, $is_kit);
+        append_values(\%locations, $loc);
+        append_values(\%depends, $dep);
+    }
+
+    my $iip_names;
+    my $included_configs;
+    if (exists($config_file_iip_names{$filename})) {
+        $iip_names = $config_file_iip_names{$filename};
+        $included_configs = $config_file_included_configs{$filename};
+    }
+    else {
+        # Parse bootimage config, let any architecture specified in config match.
+        my $config = BootImage::Config->new("*", dirname(abs_path($filename)));
+        $config->parse_file($filename, $is_kit, 1);
+        $iip_names = $config->iip_order();
+        $included_configs = $config->included_configs();
+        $config_file_iip_names{$filename} = $iip_names;
+        $config_file_included_configs{$filename} = $included_configs;
+    }
+
+    while (scalar(@$iip_names)) {
+        my $name = pop @$iip_names;
+        if (! exists $locations{$name}) {
+            error "$filename: IIP '$name' not found";
+        }
+        my @components = @{$locations{$name}};
+        foreach my $comp (@components) {
+            if (! exists $res{$comp}) {
+                $res{$comp} = "";
+                foreach (@{$depends{$comp}}) {
+                    push @$iip_names, $_;
+                }
+            }
+        }
+    }
+    return \%res, $included_configs;
+}
+
+# This function expects two references
+sub append_values {
+    my $res = shift;
+    my $extra = shift;
+
+    foreach my $key (sort(keys %$extra)) {
+        foreach my $value (@{$$extra{$key}}) {
+            push @{$$res{$key}}, $value;
+        }
+    }
+}
+
+sub get_iip_directories {
+    my $comp = shift;
+    my $depth = shift;
+    my $dirname = "$top_dir/$comp";
+    my @res;
+
+    # Special case for top of directory tree
+    if ($comp eq "") {
+        $dirname = $top_dir;
+    }
+
+    # Ignore temporary directories
+    if ($dirname =~ m/(rootdisk|iip|kit|rd|bi)\.\S{6}/) {
+        return @res;
+    }
+
+    opendir(DIR, "$dirname") or error "Could not open $dirname: $!";
+    my @dirs = grep { ! /^\./ && -d "$dirname/$_" && ! defined $skip_dirs{$_} } readdir (DIR);
+    closedir DIR;
+    foreach (@dirs) {
+        my $x = "$comp/$_";
+
+        # Special case for top of directory tree
+        if ($comp eq "") {
+            $x = $_;
+        }
+
+        # Look for directories named "iip", "iips", "parts", "menus", "manual" or
+        # containing iip.dir.
+        if (/^(iips?|parts|menus|manuals?)$/ || -f "$top_dir/$x/iip.dir") {
+            push @res, $x;
+        }
+        elsif ($depth > 20) {
+            print "Skipping $x, too deep\n";
+        }
+        else {
+            push @res, get_iip_directories($x, $depth + 1);
+        }
+    }
+    return @res;
+}
+
+sub get_iip_info {
+    my ($comp, $is_kit) = @_;
+    my $dirname = "$top_dir/$comp";
+    my $cache_key = "$comp $is_kit";
+
+    if (exists($iip_info_cache{$cache_key})) {
+        my $info = $iip_info_cache{$cache_key};
+        return ($info->{locations}, $info->{depends});
+    }
+
+    # A hash from "IIP name" to "list of components"
+    # Example: "kreatv-hal" -> ("hal/iips/hal_vip12xx", "hal/iips/hal_xilleon2xx")
+    my %locations;
+
+    # A hash from "component" to "list of IIP names"
+    # Example: "hal/iips/hal_vip12xx" -> ("kreatv-hal-common")
+    my %depends;
+
+    # Ignore temporary IIP/kit directories
+    if ($dirname =~ m/(iip|kit|rd|bi)\.\S{6}/) {
+        $iip_info_cache{$cache_key} = {
+            locations => \%locations,
+            depends => \%depends
+        };
+        return (\%locations, \%depends);
+    }
+
+    # Parse makefile (if any)
+    my $makefile = "$dirname/Makefile";
+    if (-f $makefile) {
+        open(MAKEFILE3, $makefile)
+            or error "Could not open $makefile: $!";
+        while (<MAKEFILE3>) {
+            if (/^(BUILD_IIP|IIP_NAME)(?:_DOC)?(_\d+)?\s*\+?=\s*(\S+)/) {
+                my $name = $3;
+                if ($name =~ /\$/) {
+                    error "$makefile: IIP_NAME contains variable '$name'";
+                }
+                push @{$locations{$name}}, $comp;
+            }
+            elsif (/^IIP_DEPENDS(_\d+)?\s*\+?=\s*(\S+)/) {
+                my @dep_split = split(/:/, $2, 2);
+                my $type = (scalar @dep_split == 2) ? $dep_split[0] : "rootdisk";
+                my $name = $dep_split[-1];
+
+                if ($name =~ /\$/) {
+                    error "$makefile: IIP_DEPENDS contains variable '$name'";
+                }
+                if ($name =~ m/^kreatv-license-.*/) {
+                    error "$makefile: Dependency to license IIP '$name' found. You may not depend on a licence IIP since it changes name if constrained to a serial number.";
+                }
+                if ($type eq "kit" && !$is_kit) {
+                    next;
+                }
+
+                push @{$depends{$comp}}, $name;
+            }
+            elsif (/^PREBUILT_IIP\s*\+?=\s*(\S+)/) {
+                my $name = $1;
+                if ($name =~ /\$/) {
+                    error("$makefile: PREBUILT_IIP contains variable"
+                          . " '$name'");
+                }
+                push @{$locations{$name}}, $comp;
+            }
+        }
+        close MAKEFILE3;
+    }
+
+    # Process subdirectories (if any)
+    opendir(DIR, "$dirname") or error "Could not open $dirname: $!";
+    my @dirs = grep { ! /^\./ && -d "$dirname/$_" && ! defined $skip_dirs{$_} } readdir (DIR);
+    closedir DIR;
+
+    foreach (@dirs) {
+        my ($loc, $dep) = get_iip_info("$comp/$_", $is_kit);
+        append_values(\%locations, $loc);
+        append_values(\%depends, $dep);
+    }
+    $iip_info_cache{$cache_key} = {
+        locations => \%locations,
+        depends => \%depends
+    };
+    return (\%locations, \%depends);
+}
+
+=pod
+    Replaces %VAR% with the value of the environment variable VAR.
+=cut
+sub _substitute_env_variables {
+    my $string = shift;
+    return "" unless $string;
+
+    # (.*?) gives the minimal match
+    while ($string =~ /%(.*?)%/) {
+        my $value = $ENV{$1} or
+            error "Environment variable '$1' not set";
+        $string =~ s|%\Q$1\E%|$value|g;
+        pos($string) = 0;
+    }
+
+    return $string;
+}
+
+
+# Parse the command line options (if any)
+my @opt_skip_dirs;
+GetOptions("skip-dir=s" => \@opt_skip_dirs);
+%skip_dirs = map { $_ => "" } @opt_skip_dirs;
+
+# Get the rest of the command line
+$makesystem_dir = shift;
+$top_dir = shift;
+my $component = shift;
+
+my $component_dir = ($component eq ".") ? $top_dir : "$top_dir/$component";
+my $makefile = "$component_dir/Makefile";
+my $requires_file = "$component_dir/.requires";
+my $requires_depend_file = "$component_dir/.requires_depend";
+my $requires_setup_file = "$component_dir/.requires_setup";
+my $requires_list_file = "$component_dir/.requires_list";
+
+# Open the output files
+$requires_tmp = File::Temp->new(TEMPLATE => "$requires_file.XXXXXX");
+$requires_depend_tmp = File::Temp->new(TEMPLATE => "$requires_depend_file.XXXXXX");
+$requires_setup_tmp = File::Temp->new(TEMPLATE => "$requires_setup_file.XXXXXX");
+$requires_list_tmp = File::Temp->new(TEMPLATE => "$requires_list_file.XXXXXX");
+
+@iip_directories = get_iip_directories("", 0);
+
+# Root component
+print $requires_tmp "# ROOT=$component\n\n";
+
+# Read the makefile
+my ($requires_ref, $oss_ignore_ref, $klibc_flag) =
+    read_requires($makefile, "", 1);
+%all_oss_ignore = %$oss_ignore_ref;
+
+# Ignore the "makesystem" dependency (if any), since this dependency is implicit
+delete $$requires_ref{"makesystem"};
+
+my @sorted_requires = sort(keys %$requires_ref);
+
+# Build the all: rule
+start_depend("all");
+foreach my $req (@sorted_requires) {
+    depend($req);
+}
+end_depend();
+
+# Build sub dependencies
+foreach my $req (@sorted_requires) {
+    make_sub_requires($req, [""]);
+}
+
+# Build the requires_setup file
+print $requires_depend_tmp ".requires_setup: $makefile\n\n";
+requires_setup($requires_ref, $klibc_flag);
+
+# Finish by including tree.mk
+print $requires_tmp "TREE_OSS_IGNORE = ", join(" ", sort(keys %all_oss_ignore)), "\n\n";
+print $requires_tmp "TREEDIRS = ", join(" ", sort(keys %all_requires)), "\n\n";
+print $requires_tmp "include \$(MAKESYSTEM)/tree.mk\n";
+
+# Rename created files into place.
+close $requires_tmp;
+close $requires_depend_tmp;
+close $requires_setup_tmp;
+close $requires_list_tmp;
+rename($requires_tmp, $requires_file)
+    or error "Could not create $requires_file: $!";
+rename($requires_depend_tmp, $requires_depend_file)
+    or error "Could not create $requires_depend_file: $!";
+rename($requires_setup_tmp, $requires_setup_file)
+    or error "Could not create $requires_setup_file: $!";
+rename($requires_list_tmp, $requires_list_file)
+    or error "Could not create $requires_list_file: $!";

@@ -1,0 +1,406 @@
+#!/bin/sh
+
+set -eu
+
+main_server=svn.arrisi.com
+svn_command=${SVNMIRROR_REAL_SVN:-svn}
+svn="$svn_command --non-interactive"
+interactive_svn=$svn_command
+myname=$(basename $0)
+relocation_marker_file= # Defined later
+
+error() {
+    echo "$myname: error: $*" >&2
+    exit 1
+}
+
+usage() {
+    if [ "$myname" = svn-mirror-fallback ]; then
+        extra_help='
+Tip: To get svn help, run "svn help".
+'
+    else
+        extra_help=""
+    fi
+   cat <<EOF
+Usage:
+    svn-mirror [options] checkout http://$main_server/<PATH>[@REV] [WCPATH]
+    svn-mirror [options] update [WCPATH]
+    svn-mirror [options] repair [WCPATH]
+$extra_help
+Options:
+    --fallback           Fall back to the regular svn command if a subcommand
+                         or option is not recognized.
+    -r/--revision REV    Specify revision to use.
+    --username USER      Specify revision username to use.
+    --password PASSWORD  Specify revision password to use.
+
+Subcommand aliases:
+    checkout: co
+    update: up
+
+svn-mirror uses a read-only SVN mirror to speed up checkout and update from the
+main SVN server ($main_server). To specify which mirror to use, set the
+environment variable \$SVNMIRROR to the hostname or IP address of the mirror.
+
+"svn-mirror checkout http://$main_server/<PATH>" checks out <PATH> from the
+mirror, relocates the working copy to http://$main_server/PATH<> and then
+updates the working copy with any later changes from the main SVN server.
+
+"svn-mirror update" updates a working copy by first fetching any updates from
+the mirror and then fetching remaining updates from the main SVN server.
+
+To use svn-mirror as a complete drop-in for svn, create an alias or wrapper
+script called svn which runs "svn-mirror --fallback". See
+http://kreatvwiki.arrisi.com/KreaTV/ShellConfiguration#Adding_an_alias for
+information on how to create an alias or wrapper script.
+EOF
+}
+
+verify_environment() {
+    local wc_path=$1
+    local wc_top_dir=$(get_wc_top_dir "$wc_path")
+
+    relocation_marker_file=$wc_top_dir/.svn/relocated-by-svn-mirror
+
+    set +u
+    if [ -z "$SVNMIRROR" ]; then
+        error '$SVNMIRROR is not set'
+    fi
+    set -u
+    verify_non_interactive_credentials http://$main_server/dev
+    verify_non_interactive_credentials http://$SVNMIRROR/dev
+    verify_wc_sanity "$wc_path"
+}
+
+verify_non_interactive_credentials() {
+    local repo_url=$1
+    if $svn info "$repo_url" 2>&1 | grep -q "rejected Basic challenge"; then
+        # Give the user a chance to enter credentials
+        $interactive_svn info "$repo_url" >/dev/null
+        if $svn info "$repo_url" 2>&1 | grep -q "rejected Basic challenge"; then
+            cat <<EOF >&2
+
+===============================================================================
+
+Error: svn-mirror needs to be able to perform non-interactive commands
+towards $repo_url.
+
+You have two options:
+
+  1. Let SVN store the username and password; see [1] below. To do that, make
+     sure that store-auth-creds is set to yes in ~/.subversion/config.
+
+OR
+
+  2. Explicitly pass --username and --password to svn-mirror.
+
+Please perform one of the above measures and rerun the command.
+
+[1] http://svnbook.red-bean.com/en/1.5/svn.serverconfig.netmodel.html#svn.serverconfig.netmodel.credcache
+EOF
+            exit 1
+        fi
+    fi
+}
+
+verify_wc_sanity() {
+    local wc_path=$1
+    if [ -f $relocation_marker_file ]; then
+        echo "Detected previously interrupted svn-mirror operation, fixing:"
+        relocate_to_main_server "$wc_path"
+    fi
+}
+
+get_wc_top_dir() {
+    local dir=$1
+    while $svn_command info ../$dir >/dev/null 2>&1; do
+        dir=../$dir
+    done
+    echo $dir
+}
+
+get_peg_revision() {
+    echo $1 | sed -nr 's!.*@(.*)!\1!p'
+}
+
+get_unpegged_url() {
+    echo $1 | sed -r 's!(.*)@.*!\1!'
+}
+
+find_mirror_url_to_check_out() {
+    local url=$1
+    local url_to_check_out=""
+    local mirror_url=$(echo $url | sed "s!/$main_server/!/$SVNMIRROR/!")
+
+    if [ $mirror_url = $url ]; then
+        error "The specified URL should refer to $main_server"
+    fi
+
+    # Check whether the URL exists on the mirror.
+    if url_exists $mirror_url; then
+        echo $mirror_url
+        return
+    fi
+
+    # Check whether the URL without peg revision (if any) exists on the mirror.
+    local peg_revision=$(get_peg_revision $url)
+    if [ -n "$peg_revision" ]; then
+        local unpegged_mirror_url=$(get_unpegged_url $mirror_url)
+        if url_exists $unpegged_mirror_url; then
+            echo $unpegged_mirror_url
+            return
+        fi
+    fi
+
+    # Check from where the URL originates.
+    last_copy_row=$($svn log --stop-on-copy --verbose $url 2>/dev/null \
+                    | awk '$0 == "Changed paths:" { row = "" }
+                           $3 == "(from" { row = $0 }
+                           END { print row }')
+    if [ -n "$last_copy_row" ]; then
+        local to_url=http://$main_server/dev$(echo $last_copy_row | awk '{print $2}')
+        local from_path=$(echo $last_copy_row | sed -r 's!.*\(from ([^:]+):.*!\1!')
+        local from_rev=$(echo $last_copy_row | sed -r 's!.*\(from .*:(.*)\)!\1!')
+        local path_prefix=${url#$to_url}
+        local copy_url=http://$main_server/dev$from_path$path_prefix@$from_rev
+        echo $(find_mirror_url_to_check_out $copy_url)
+    fi
+    # else: no suitable URL found.
+}
+
+get_wc_path() {
+    if [ "$#" -eq 2 ]; then
+        echo "$2"
+    else
+        echo "$(basename $1 | sed 's!@.*!!')"
+    fi
+}
+
+get_wc_info() {
+    local wc_path=$1
+    local key=$2
+    $svn info "$wc_path" 2>/dev/null | awk '$1 == "'$key':" { print $2 }'
+}
+
+relocate_to_mirror() {
+    local wc_path=$1
+    echo "Relocating to $SVNMIRROR..."
+    touch $relocation_marker_file
+    $svn switch --relocate http://$main_server http://$SVNMIRROR "$wc_path"
+}
+
+relocate_to_main_server() {
+    local wc_path=$1
+    echo "Relocating to $main_server..."
+    $svn switch --relocate http://$SVNMIRROR http://$main_server "$wc_path"
+    rm -f $relocation_marker_file
+}
+
+url_exists() {
+    local url=$1
+    $svn info $url >/dev/null 2>&1
+}
+
+do_checkout() {
+    local url=$1
+    local wc_path=$(get_wc_path "$@")
+
+    verify_environment "$wc_path"
+
+    if [ -n "$opt_revision" ]; then
+        # -r/--revision has precedence over pegged revision.
+        url=$(get_unpegged_url $url)@$opt_revision
+    fi
+
+    echo "Finding URL to check out on $SVNMIRROR..."
+    local url_to_check_out=$(find_mirror_url_to_check_out $url)
+    if [ -z "$url_to_check_out" ]; then
+        echo "None found. Checking out directly from $main_server..."
+        $svn checkout $url "$wc_path"
+    else
+        echo "Checking out $url_to_check_out..."
+        $svn checkout $url_to_check_out "$wc_path"
+        touch $relocation_marker_file
+        relocate_to_main_server "$wc_path"
+        local wc_revision=$(get_wc_info "$wc_path" Revision)
+        if [ -z "$opt_revision" ] || [ $wc_revision != $opt_revision ]; then
+            echo "Updating from $url..."
+            $svn switch $url "$wc_path"
+        fi
+    fi
+
+    exit 0
+}
+
+do_update() {
+    local wc_path=$1
+    local wc_revision=$(get_wc_info "$wc_path" Revision)
+
+    verify_environment "$wc_path"
+
+    if [ -z "$wc_revision" ]; then
+        error "No such working copy: $wc_path"
+    fi
+    local wc_url=$(get_wc_info "$wc_path" URL)
+    local mirror_url=$(echo $wc_url | sed "s!/$main_server/!/$SVNMIRROR/!")
+
+    if [ -n "$opt_revision" ]; then
+        # Update to the given revision.
+        echo -n "Checking whether it's possible to use $SVNMIRROR..."
+        if url_exists $mirror_url@$opt_revision \
+           && url_exists $mirror_url@$wc_revision; then
+            echo " yes"
+            relocate_to_mirror "$wc_path"
+            echo "Updating from $SVNMIRROR..."
+            $svn update -r $opt_revision "$wc_path"
+            relocate_to_main_server "$wc_path"
+        else
+            echo " no"
+            echo "Updating from $main_server..."
+            $svn update -r $opt_revision "$wc_path"
+        fi
+    else
+        # Update to latest revision.
+        echo -n "Checking whether there are updates on $SVNMIRROR..."
+        if url_exists $mirror_url@$(($wc_revision + 1)); then
+            echo " yes"
+            relocate_to_mirror "$wc_path"
+            echo "Updating from $SVNMIRROR..."
+            $svn update "$wc_path"
+            relocate_to_main_server "$wc_path"
+        else
+            echo " no"
+        fi
+        echo "Updating from $main_server..."
+        $svn update "$wc_path"
+    fi
+
+    exit 0
+}
+
+do_repair() {
+    local wc_path=$1
+    verify_environment "$wc_path"
+    exit 0
+}
+
+do_exit () {
+    if [ -z "$fallback" ]; then
+        usage
+        exit 1
+    fi
+
+    if [ -n "$opt_revision" ]; then
+        exec $interactive_svn -r $opt_revision "$@"
+    fi
+    exec $interactive_svn "$@"
+}
+
+interrupt_handler() {
+    if [ -n "$relocation_marker_file" -a -f "$relocation_marker_file" ]; then
+        cat <<EOF >&2
+===============================================================================
+svn-mirror was interrupted while the working copy still points to the
+mirror. Run "svn-mirror repair" to fix the working copy.
+EOF
+    fi
+    exit 1
+}
+
+# -----------------------------------------------------------------------------
+
+opt_revision=
+immediate_exit=
+fallback=
+
+trap interrupt_handler INT TERM QUIT
+
+if [ "$myname" = svn-mirror-fallback ]; then
+    fallback=1
+fi
+
+# First pass: extract options, which may be placed anywhere in the
+# command line (except for --fallback which should be first).
+i=0
+num_args="$#"
+while [ $i -lt $num_args ]; do
+    case $1 in
+        --fallback)
+            fallback=1
+            ;;
+        --username|--password)
+            svn="$svn $1 $2"
+            interactive_svn="$interactive_svn $1 $2"
+            i=$((i+1))
+            shift
+            ;;
+        -r|--revision)
+            opt_revision=$2
+            shift
+            i=$((i+1))
+            ;;
+        -r*)
+            opt_revision=$(echo $1 | sed 's!^-r!!')
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            # Options not recognized by svn-mirror. Regular svn will be called
+            # in do_exit if fallback is active.
+            immediate_exit=1
+            # Rotate, i.e. remove first argument and put it last.
+            set -- "$@" "$1"
+            ;;
+        *)
+            # Rotate, i.e. remove first argument and put it last.
+            set -- "$@" "$1"
+            ;;
+    esac
+    shift
+    i=$((i+1))
+done
+
+# Exit immediately if option is not recognized.
+if [ -n "$immediate_exit" ]; then
+    do_exit "$@"
+fi
+
+# Second pass: handle subcommand
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        checkout|co)
+            shift
+            if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
+                do_exit checkout "$@"
+            fi
+            do_checkout "$@"
+            ;;
+        repair)
+            shift
+            if [ "$#" -eq 0 ]; then
+                set -- .  # Default to current working directory
+            fi
+            do_repair "$@"
+            ;;
+        update|up)
+            shift
+            if [ "$#" -eq 0 ]; then
+                set -- .  # Default to current working directory
+            elif [ "$#" -ne 1 ]; then
+                do_exit up "$@"
+            fi
+            do_update "$1"
+            ;;
+        *)
+            do_exit "$@"
+            ;;
+    esac
+
+    shift
+done
+
+usage
+exit 1

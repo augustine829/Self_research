@@ -1,0 +1,36 @@
+#!/usr/bin/env python2
+
+u"""
+  %prog [OPTIONS] FILE_PATH_OR_URL
+
+  This program helps to find out the commits that made changes to path
+  name or line content.
+
+  If option --line (-l) is provided, the program traces the changes in
+  dedicated line of a file. Otherwise, the name history of a path is
+  traced backward across branches till its creation.
+
+  Examples:
+    $ %prog -l 744  http://root/branch/foo.cpp@401197
+
+    Backtrace changes to line 744 in foo.cpp of branch@401197.
+
+    $ %prog -l 52 foo.cpp
+
+    Backtrace changes to line 52 in foo.cpp in current working copy.
+
+    $ %prog -l 152 -r 379892 http://root/branch/foo.cpp
+
+    Backtrace changes to line 152 in foo.cpp of r379892 in a branch.
+
+    $ %prog http://root/branch/foo.cpp@362109
+
+    Backtrace old names of foo.cpp since r362109.
+"""
+
+import sys
+from os.path import dirname, realpath
+sys.path.insert(0, dirname(realpath(__file__)) + "/../lib")
+from tracecommit.main import main
+
+main(__doc__)

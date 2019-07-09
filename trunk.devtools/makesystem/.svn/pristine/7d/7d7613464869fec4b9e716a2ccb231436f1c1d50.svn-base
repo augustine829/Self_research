@@ -1,0 +1,150 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use strict;
+use warnings FATAL => 'all';
+use KreaTV;
+
+# Parameters
+my $verbose = 0;
+my $delete = 0;
+my $multiple = 0;
+
+my (%allowed_values, $default_value, $html_dir, $meta_name, %not_allowed_values, %skip);
+while (my $param = shift) {
+    if ($param eq "--dir") {
+	$html_dir = shift;
+    }
+
+    if ($param eq "--meta") {
+	$meta_name = shift;
+    }
+
+    if ($param eq "--default") {
+	$default_value = shift;
+    }
+
+    if ($param eq "--allowed") {
+	my $value = shift;
+	$allowed_values{$value} = 1;
+    }
+
+    if ($param eq "--notallowed") {
+	my $value = shift;
+	$not_allowed_values{$value} = 1;
+    }
+
+    if ($param eq "--verbose") {
+	$verbose = 1;
+    }
+
+    if ($param eq "--multiple") {
+	$multiple = 1;
+    }
+
+    if ($param eq "--delete") {
+	$delete = 1;
+    }
+
+    if ($param eq "--skip") {
+	my $skip_name = shift;
+	$skip{$skip_name} = 1;
+    }
+}
+
+print "Checking $meta_name\n";
+
+if ($verbose) {
+    while (my ($key, $value) = each %allowed_values) {
+	print "Allowed value: $meta_name = $key\n";
+    }
+
+    while (my ($key, $value) = each %not_allowed_values) {
+	print "Not allowed value: $meta_name = $key\n";
+    }
+}
+
+my @files = KreaTV::backticks("find $html_dir -type f");
+chomp @files;
+foreach my $file (@files) {
+    my $allowed = 0;
+    my $not_allowed = 0;
+    my $found = 0;
+    my $found_error;
+
+    if ($file =~ m!(.*)\.htm!) {
+	$file =~ m!$html_dir/(.+)!;
+	my $file_name = $1;
+	if ($skip{$file_name}) {
+	    $allowed = 1;
+	}
+	else {
+	    open(HTML_FILE, "< $file") or die "Error: Could not open $file: $!";
+	    while (my $line = <HTML_FILE>) {
+		if ($line =~ m/\<meta(\s+)name=\"$meta_name\"(\s+)content=\"(.*?)\"/) {
+		    my $content = $3;
+		    $found++;
+
+		    if ( (! $multiple) && ( $found > 1) ) {
+			print "Error: $file: has multiple $meta_name values\n";
+			$found_error = 1;
+		    }
+
+		    if (exists $allowed_values{$content}) {
+			if ($verbose) {
+			    print "Info: $file: $meta_name = $content is allowed\n";
+			}
+			$allowed = 1;
+		    }
+		    elsif (exists $not_allowed_values{$content}) {
+			print "Error: $file: $meta_name = $content is not allowed\n";
+			$not_allowed = 1;
+			$found_error = 1;
+		    }
+		    else {
+			if ($verbose) {
+			    print "Info: $file: $meta_name = $content found\n";
+			}
+		    }
+		}
+	    }
+	    close HTML_FILE;
+	}
+
+	if ($not_allowed) {
+	    if ($delete) {
+		KreaTV::system("rm -f $file");
+	    }
+	}
+	elsif ($allowed) {
+
+	}
+	else {
+	    if (exists $allowed_values{$default_value}) {
+		if ($verbose) {
+		    print "Info: $file: $meta_name = $default_value (default value) content is allowed\n";
+		}
+	    }
+	    else {
+		if ($delete) {
+		    KreaTV::system("rm -f $file");
+		}
+                else {
+                    print "Error: $file has no allowed $meta_name\n";
+                    $found_error = 1;
+		}
+	    }
+	}
+    }
+    else {
+	if ($verbose) {
+	    print "Info: Ignoring $file\n";
+	}
+    }
+
+    if (defined($found_error)) {
+	exit 1;
+    }
+}

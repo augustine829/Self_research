@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -eu
+
+. $(dirname $0)/common.sh
+
+read verbose
+read username
+read password
+read merge_id
+
+if [ "$verbose" = true ]; then
+    quiet=""
+else
+    quiet="--quiet"
+fi
+
+wcdir="$remote_workdir/$merge_id"
+
+echo "Committing on remote server..."
+svn commit $quiet --no-auth-cache --username "$username" \
+    --password "$password" -F - "$wcdir"
+
+# Fetch any changed externals.
+echo "Updating working copy on remote server..."
+svn update $quiet --no-auth-cache --username "$username" \
+    --password "$password" "$wcdir"

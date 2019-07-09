@@ -1,0 +1,33 @@
+#!/bin/sh
+
+if [ -z $1 ]; then
+   echo "This tool uses a three way diff to let you graphically resolve an SVN conflict."
+   echo "Usage: Run this tool with a conflicted file as argument."
+   echo ""
+   exit 0
+fi
+
+if [ ! -f $1 ]; then
+    echo "Error: $1 is not a file."
+    exit 1
+fi
+
+if ! svn st $1 | grep -q ^C; then
+    echo "$1 is not in conflict, ignoring."
+    exit 0
+fi
+
+if ! kdiff3 $1.merge-left.* $1.working $1.merge-right.* -o $1 --L1 "Base - Without any changes" --L2 "Only with your changes" --L3 "Only with merged in changes"
+then
+    echo "Error: Could not run kdiff3 properly."
+    exit 1
+fi
+
+rm -f $1.orig
+
+echo ""
+echo -n "Do you want me to resolve the conflicted state of $1 with the changes you just made? [y/n] "
+read answer
+if [ "$answer" = "y" ]; then
+    svn resolve --accept working $1
+fi

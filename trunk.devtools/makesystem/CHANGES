@@ -1,0 +1,3401 @@
+Check the bottom of this document for version numbering info.
+Use the "Working" section while on a branch.
+Set version only when merging to trunk.
+Keep the "Working" section, but leave it empty, on trunk.
+
+Working
+=======
+
+
+Version 76.1.3 (2015-11-09)
+===========================
+
+* Toolchain 2.2.2 for bcm15.
+
+
+Version 76.1.2 (2015-10-22)
+===========================
+
+* Fixed regression in build_requires related to kit configs.
+
+
+Version 76.1.1 (2015-10-19)
+===========================
+
+* Replaced svn.ea.mot.com with svn.arrisi.com.
+
+
+Version 76.1.0 (2015-10-16)
+===========================
+
+* Added TOI/JS helper files for automatic code completion.
+
+
+Version 76.0.0 (2015-10-13)
+===========================
+
+* Host toolchain 2.2.0 with gcc 5.2.0 and binutils 2.25.1.
+* Don't export *_TOOLCHAIN_PATH to componentcache anymore since it's no longer
+  needed.
+* Removed support for icecream.
+* Removed HOST_WORD_LENGTH.
+* Changed *.ea.mot.com host names (except svn.ea.mot.com) to *.arrisi.com.
+
+
+Version 75.0.0 (2015-10-12)
+===========================
+
+* Removed device targets HMC3000 and HMC4000.
+* Removed toolchain target HI3716.
+
+
+Version 74.0.1 (2015-10-08)
+===========================
+
+* Modified KreaTV::warning method to print to stdout instead of stderr.
+
+
+Version 74.0.0 (2015-10-02)
+===========================
+
+* Removed support for vip19x3 target.
+* Updated build_requires. When looking for requirements to build a boot image,
+  it will not follow kit dependencies (i.e. IIP_DEPENDS += kit:<iip>).
+
+
+Version 73.2.1 (2015-09-28)
+===========================
+
+* Toolchain 2.0.1 for st9 with security fixes.
+
+
+Version 73.2.0 (2015-09-21)
+===========================
+
+* Added VIP55X2 target.
+
+
+Version 73.1.0 (2015-09-16)
+===========================
+
+* Hide superfluous dynamic symbols in toiweb plugins.
+* Don't glob-expand BUILD_LIB_VER in build.mk.
+
+
+Version 73.0.5 (2015-08-20)
+===========================
+
+* Toolchain 2.2.1 for bcm15 with support for utmpx.
+
+
+Version 73.0.4 (2015-08-19)
+===========================
+
+* The PARAMETER_DEPENDENCIES_TARGET variable will be set to the environment
+  when building boot images and kits. Its purpose is to hold a path to a file,
+  unique for each boot image or kit, where parameter dependencies can be
+  written. Parameter dependencies are paths to files, specified in IIP
+  parameters, which are needed to build a boot image or kit. The information
+  will be used to build the build server support archives for boot images and
+  kits so that required files will be available for on-demand builds.
+
+
+Version 73.0.3 (2015-08-12)
+===========================
+
+* BCM15: Disabled -O2 flag in favor of -Os
+
+
+Version 73.0.2 (2015-07-16)
+===========================
+
+* Added -ffunction-sections and -fdata-sections for nopic to reduce size
+  of bootloader (RBL).
+
+
+Version 73.0.1 (2015-07-10)
+===========================
+
+* bcm15 toolchain 2.2.0 with OPTION_EGLIBC_CHARSETS enabled.
+
+
+Version 73.0.0 (2015-07-01)
+===========================
+
+* Updated module build include paths for BCM15.
+
+
+Version 72.1.0 (2015-06-26)
+===========================
+
+* Made the value of ARCH_BUILD equal to that of ARCH_HOST.
+* Build .sources before .depfiles, as .sources might remove .depfiles.
+* Fixed bookkeeping of disted files in working copies whose name ends with
+  "dist".
+* Host toolchain 2.1.0 with GCC 5.1.0.
+* Require componentcache with compatibility mode 3 (version 1.31 or higher).
+* Added KreaTV::lstat function that returns timestamps with subsecond
+  resolution.
+* Let dist_targets record timestamps instead of MD5 sum of disted files.
+
+
+Version 72.0.0 (2015-06-25)
+===========================
+
+* BCM15 toolchain 2.1.1 with eglibc and hard floats
+
+
+Version 71.8.2 (2015-06-17)
+===========================
+
+* build_requires will add dependencies to boot image and kit configs to
+  .requires_depend. Both configs included by other configs and configs
+  directly referenced by the component Makefile are added.
+
+
+Version 71.8.1 (2015-06-17)
+===========================
+
+* Added EXAMPLE_PATH to doxygen config.
+
+
+Version 71.8.0 (2015-06-09)
+===========================
+
+* Made it possible to run "binary_file get" outside a bsg source tree.
+* Added make variable NO_AUTO_FETCH_BREFS, which can be set to opt out from the
+  automatic fetching of binary files for all brefs in the component.
+* Only fetch toolchains from brefs when needed.
+* Changed the way source kits (e.g. HDK) modify the makesystem to not install
+  any toolchains.
+
+
+Version 71.7.0 (2015-05-29)
+===========================
+
+* Made createmock understand explicit constructors.
+* Made install_parts tolerate whitespace before commands.
+
+
+Version 71.6.3 (2015-05-27)
+===========================
+
+* Toolchains have been added to binary repo. The .bref files are stored in the
+  toolchains subdirectory. Toolchains are no longer downloaded from
+  http://svn.ea.mot.com/downloads/toolchain/.
+* Fixed a race condition where .d files generated by the make instance of
+  target A were included by the make instance of target B while still being
+  written to.
+
+
+Version 71.6.2 (2015-05-22)
+===========================
+
+* Fixed source dependency file inclusion which broke in 71.5.1. Also, only
+  generate and dist a deps file (which contains accumulated source
+  dependencies) for non-update builds, as the resulting file is only used by
+  the postcheck script check_requires.
+
+
+Version 71.6.1 (2015-05-21)
+===========================
+
+* Improved performance of install_component.
+
+
+Version 71.6.0 (2015-05-20)
+===========================
+
+* Fixed IDL generation rules so that they are not confused by bref stamp
+  dependencies in components that contain binary files.
+
+
+Version 71.5.2 (2015-05-18)
+===========================
+
+* Use -ffunction-sections and -fdata-sections for klibc.
+
+
+Version 71.5.1 (2015-05-08)
+===========================
+
+* Prevent the parallel build error described in KREATV-28549 by doing a single
+  concatenation of .d files (in the local_all rule) rather than concatenating
+  in the object file generation rule (which is often executed in parallel).
+
+
+Version 71.5.0 (2015-05-05)
+===========================
+
+* createmock now creates "nice, naggy and strict" mocks (see Google Mock
+  documentation for explanation) and makes "nice mocks" the default.
+  Previously, the mocks were "naggy".
+
+
+Version 71.4.3 (2015-04-30)
+===========================
+
+* Don't use system toolchain when building with USE_GCOV.
+* Minor improvements to documentation.
+
+
+Version 71.4.2 (2015-04-17)
+===========================
+
+* Updating makesystem to fix several issues of the documentation for TOI3/JS.
+
+
+Version 71.4.1 (2015-04-16)
+===========================
+
+* Provide error when trying to depend on a license IIP.
+
+
+Version 71.4.0 (2015-04-14)
+===========================
+
+* Support the optional feature to distribute the unobfuscated Javascript
+* files for internal debugging purpose.
+
+
+Version 71.3.0 (2015-04-10)
+===========================
+
+* The variable INTERMEDIATE_COMPONENT is now set to true when building
+  local_all in all components but the goal component.
+* Removed no longer needed ulimit hack introduced in version 66.2.1.
+
+
+Version 71.2.2 (2015-04-07)
+===========================
+
+* Updating makesystem documentation with the 'kit' IIP dependency type.
+
+
+Version 71.2.1 (2015-04-02)
+===========================
+
+* Ignore USE_KLIBC when building for host.
+
+
+Version 71.2.0 (2015-03-25)
+===========================
+
+* Increased recommended ccache max size from 10 GB to 50 GB.
+* Ignore USE_KLIBC when linking on host.
+* Only dist headers in the setup step for non-3pps.
+* Removed check in check_env for 32-bit libraries.
+* Java toolchain 2.0.0 for 64-bit.
+* Build with -Wnon-virtual-dtor in non-3pp components.
+* Set RPATH for 3pps as well to make USE_EXTRA_DEBUG work.
+* Don't use system toolchain when building with USE_EXTRA_DEBUG.
+
+
+Version 71.1.0 (2015-03-17)
+===========================
+
+* Added KIT_KREATV_VERSION variable so kits can belong to a particular KreaTV
+  version. Legal values are 4 or 5 (or null). Kits which define this value will
+  not be built if BSG_BUILD_VERSION is set to the other value
+* Added KIT_NAME_PREFIX with default value 'kreatv'. This is used for the file
+  naming of kits.
+
+
+Version 71.0.0 (2015-03-10)
+===========================
+
+* New toolchains rebuilt on 64-bit hosts with -std=c++11 as default.
+* Removed HOST_CFLAGS.
+
+
+Version 70.0.1 (2015-03-02)
+===========================
+
+* Fixed unittests sometimes frozen forever.
+
+
+Version 70.0.0 (2015-02-28)
+===========================
+
+* Added new global make variable NO_DEBUG_LOGGING which decides
+  whether debug logging code and strings should be pruned from binaries.
+
+
+Version 69.0.2 (2015-02-27)
+===========================
+
+* Hi3716 toolchain 1.0.4
+
+
+Version 69.0.1 (2015-02-24)
+===========================
+
+* New toolchains for bcm15 and bcm45 with updated 3PPLICENSE information.
+
+
+Version 69.0.0 (2015-02-24)
+===========================
+
+* ST9 toolchain 1.2.1
+* Removed the B2120 target
+
+
+Version 68.0.0 (2015-02-24)
+===========================
+
+* Dist toiweb js docs to dist/doc
+
+
+Version 67.0.1 (2015-02-17)
+===========================
+
+* Don't use system toolchain for PRODUCES_STANDALONE_BINARY components if
+  USE_SANITIZE is set.
+* Documented USE_QUILT_GUARDS.
+* makesystem now makes sure that the build user can open up to 4096 files.
+
+
+Version 67.0.0 (2015-02-13)
+===========================
+
+* Removes support for TARGET_NAME_STB_HOST target.
+
+
+Version 66.5.1 (2015-02-10)
+===========================
+
+* Mentioned the existence of the copy_data_to_rootdisk IIP install script
+  in the documentation.
+* Added detection of conflicting info in duplicate 3PPLICENSE files.
+* Made license_parser.py work with Python 2.6.
+
+
+Version 66.5.0 (2015-02-09)
+===========================
+
+* ST9 toolchain 1.1.1.
+
+
+Version 66.4.0 (2015-02-06)
+===========================
+
+* BCM15 toolchain 1.1.2 fixing build of static binaries.
+
+
+Version 66.3.0 (2015-02-04)
+===========================
+
+* Updates install_licenses script to include 3PPLICENSE files with LICENSE set
+  to Proprietary in IIPs when they are built.
+* The list of restricted 3pp software, included in a kit, has been moved to be
+  printed after the kit tests have been run instead of before.
+* Updates the license_parser.py script to be able to parse new fields for
+  3PPLICENSE files. The fields are EMBEDDED_NAME, EMBEDDED_VERSION and
+  EMBEDDED_LICENSE. Support for an END_ATTRIBUTION delimiter with _name suffix
+  has also been added.
+* OpenSSL is a valid value for the LICENSE fields.
+
+
+Version 66.2.1 (2015-02-04)
+===========================
+
+* makesystem now makes sure that the build user can start up to 4096 processes.
+
+
+Version 66.2.0 (2015-02-03)
+===========================
+
+* Setting USE_SYSTEM_TOOLCHAIN_FOR_HOST now only means "use system toolchain".
+  This variable can be set when building on systems where the KreaTV host
+  toolchain doesn't work.
+* Added a new PRODUCES_STANDALONE_BINARY variable, which should be set in
+  Makefiles of tools that should be possible run outside a build tree, e.g. the
+  logclient.
+
+
+Version 66.1.1 (2015-01-28)
+===========================
+
+* Changed separator used in internal .target_%, .install_toolchain_% and
+  .install_flavour_% targets. This fixes a problem (or rather: makes it less
+  likely) when a directory in the build path contains a toolchain name
+  surrounded by the separator (previously "_"), e.g. DEV_test_something (where
+  "test" is a toolchain name).
+
+
+Version 66.1.0 (2015-01-27)
+===========================
+
+* Added support for specifying doc part dependencies for doxygen pages
+  generated by a doc part.
+* Added makesystem variable BUILD_DOCPART_DOXY_DEPS
+* Making BUILD_DOCPART_DOXY_TAB mandatory for doxy doc parts.
+* Exposing BUILD_DOCPART_TOOLS_DIR to Makefiles, used to access
+  jsdoc tool.
+
+
+Version 66.0.2 (2015-01-26)
+===========================
+
+* Adding support for a host toolchain for Ubuntu. The toolchain will be used
+  when the compilation server has Ubuntu installed, otherwise the default host
+  toolchain is used.
+
+
+Version 66.0.1 (2015-01-22)
+===========================
+
+* Update st40 toolchain to version 4.0.5. The new toolchain contains updated
+  3PPLICENSE files only.
+
+
+Version 66.0.0 (2015-01-21)
+===========================
+
+* Adapted usage of callerfactory.py to match changes in BSG.
+* Let common.mk pass IDL_INCPATH as the IDL include path(s) to callerfactory.py
+  for internal components instead of hardcoding the TOI IDL location in dist
+  (thus making it possible to let internal TEI components include non-TOI IDL
+  files).
+
+
+Version 65.0.1 (2015-01-21)
+===========================
+
+* Create a switch named "NO_TOI_JS_OBFUSCATION" to support to un-minify/minify
+  JavaScript files.
+
+
+Version 65.0.0 (2015-01-19)
+===========================
+
+* New bcm45 toolchain version (4.0.0) featuring GCC 4.8.3.
+
+
+Version 64.1.0 (2015-01-15)
+===========================
+
+* New doc toolchain 1.0.4 with mscgen tool.
+* Added rules for generating sequence diagram images from *.msc files.
+
+
+Version 64.0.0 (2015-01-15)
+===========================
+
+* Let dist_targets record file type and MD5 sum of disted files.
+* Made it possible to pass multiple --include and --exclude options to
+  dist_targets.
+* Made dist_target --include and --exclude options apply to the full source
+  path, not just the filename.
+* Added build.mk support for flavoured IIPs.
+
+
+Version 63.0.0 (2015-01-13)
+===========================
+
+* New toolchain for bcm15 (1.1.1) and bcm45 (3.0.4) with signalfd.h patched to
+  work in C++ code.
+* Run unit tests in a separate network namespace if USE_NETNS is defined.
+* Renamed proclifetime to testrunner.
+* Enable hardening for 3pp components as well (when USE_HARDENING is set).
+
+
+Version 62.2.0 (2014-12-30)
+===========================
+
+* Change IDL rules for TOIWEB support.
+* Added toiweb.mk for toiweb plugin.
+* Added some new keywords for TOIWEB support:
+  TOIWEB_PLUGIN - The toiweb plugin name that will be created.
+  TOIWEB_PLUGIN_IDLS - IDL file list that is used to create toiweb plugin.
+
+
+Version 62.1.0 (2014-12-11)
+===========================
+
+* Improved linkmap parser script to understand the linkmap format produced by
+  the host toolchain.
+* Host toolchain 1.2.1 with gcc 4.9.2.
+* Let binary_file follow HTTP redirects.
+
+
+Version 62.0.1 (2014-12-10)
+============================
+
+* Set "BUILD_HMC4000 = true".
+
+
+Version 62.0.0 (2014-12-05)
+============================
+
+* New toolchain for BCM15 (gcc 4.8).
+
+
+Version 61.11.1 (2014-12-05)
+============================
+
+* Add the nosec boot image as a product. It will then be handled the same way
+  as the other products including being listed as a product on the build
+  system build page.
+
+
+Version 61.11.0 (2014-11-26)
+============================
+
+* Added new target TARGET_NAME_HMC4000 (toolchain hi3716).
+
+
+Version 61.10.1 (2014-11-24)
+============================
+
+* Build with -fno-omit-frame-pointer for ST9.
+
+
+Version 61.10.0 (2014-11-06)
+============================
+
+* New Python toolchain:
+  - Upgraded Python from 2.7.3 to 2.7.8.
+  - Added pyflakes and pep8 tools.
+
+
+Version 61.9.1 (2014-10-31)
+===========================
+
+* Adding HOST_WORD_LENGTH as public makesystem variable.
+* If USE_SYSTEM_TOOLCHAIN_FOR_HOST is set then:
+  - Hardening is disabled.
+  - Command option "-Wdate-time" is not used.
+  - Command option "-std=c++11" is not used, instead "-std=c++0x" is used.
+
+
+Version 61.9.0 (2014-10-30)
+===========================
+
+* Fixes related to USE_HARDENING and 3pp components.
+* Minor fix in proclifetime.
+
+
+Version 61.8.0 (2014-10-29)
+===========================
+
+* Allowing Apache v1.1 license.
+
+
+Version 61.7.0 (2014-10-20)
+===========================
+
+* Added new global make variable USE_EXTRA_DEBUG which enables
+  glibcxx debug and implicitly defines USE_HARDENING.
+
+
+Version 61.6.0 (2014-10-20)
+===========================
+
+* Fixed module link options for st9 and hi3716 toolchains.
+* Updated doc/README.mmd to reflect the new normal case for a boot image
+  Makefile.
+* Always create depfile in install_parts when provided as an argument.
+
+
+Version 61.5.0 (2014-10-16)
+===========================
+
+* ST40 toolchain 4.0.4 which disables FORCE_SHAREABLE_TEXT_SEGMENTS.
+
+
+Version 61.4.0 (2014-10-14)
+==========================
+
+* Added MODULE_LINUX_FLAVOUR which can be used when linux kernel headers are not
+  in default path. E.g. the firmware kernel use a different include path for kernel
+  headers and needs this.
+
+
+Version 61.3.0 (2014-10-13)
+==========================
+
+* Add doxygen build variable to specify targeted doc tab.
+  See BUILD_DOCPART_DOXY_TAB in the documentation for more information.
+
+
+Version 61.2.0 (2014-10-07)
+==========================
+
+* Build with -fsanitize=address and -fsanitize=undefined on host if
+  USE_SANITIZE is defined.
+* Added $(ALL_BREF_STAMPS) to bref.mk.
+* Added support for alternative binary repository given by SVN property.
+
+
+Version 61.1.0 (2014-10-01)
+==========================
+
+* Revert digest related stuff introduced with KREATV-18260.
+
+
+Version 61.0.0 (2014-09-30)
+===========================
+
+* Added ST ARM based targets and ST9 toolchain.
+* Removed usage of 3PP bin device directory when building boot images.
+
+
+Version 60.5.2 (2014-09-26)
+==========================
+
+* Removed IIP runtime install/uninstall support.
+
+
+Version 60.5.1 (2014-09-25)
+===========================
+
+* Disable pkg-config.
+
+Version 60.5.0 (2014-09-15)
+===========================
+
+* Added -Wpointer-arith to warn about arithmics involving pointers to void.
+* Fixed bug preventing proper rebuilding of object files in components with SCU
+  enabled.
+* ST40 toolchain 4.0.3 with support for ifaddrs.h.
+
+
+Version 60.4.0 (2014-09-12)
+===========================
+
+* Host toolchain 1.2.0, using gold linker.
+
+
+Version 60.3.0 (2014-08-29)
+===========================
+
+* Generate correct header guards when creating mocks.
+* Improved "make local_clean" behavior for update builds where a .bref has been
+  updated from the version control system. Previously, an update build could
+  fail with an "Error: Binary file FILE has been modified" message even if FILE
+  was unmodified.
+* Build with -Wdate-time on host.
+* Make sure PARALLEL_3PP is either unset or equal to "true".
+
+
+Version 60.2.1 (2014-08-22)
+===========================
+
+* Make warnings and errors when building boot images more obvious
+
+
+Version 60.2.0 (2014-08-05)
+===========================
+
+* Bumped bcm15 toolchain to 1.0.7 with added mtd ioctls for production test
+* Bumped bcm45 toolchain to 3.0.3 with added mtd ioctls for production test
+
+
+Version 60.1.0 (2014-07-01)
+===========================
+
+* Added Broadcom ARM based targets and BCM15 toolchain.
+
+
+Version 60.0.1 (2014-06-27)
+===========================
+
+* Made Python programs pep8 and pyflakes clean.
+
+
+Version 60.0.0 (2014-06-19)
+===========================
+
+* Enabled C++11 features for all toolchains.
+* New bcm45 toolchain 3.0.2 with fixes in std::shared_ptr and std::unique_ptr.
+* Fixed bug when building in a top directory whose name contains characters
+  that are specially interpreted in regular expressions (e.g. "+").
+
+
+Version 59.4.1 (2014-06-11)
+===========================
+
+* ST40 toolchain 4.0.2.
+
+
+Version 59.4.0 (2014-06-04)
+===========================
+
+* Host toolchain 1.1.0 with gcc 4.9.0.
+
+
+Version 59.3.1 (2014-06-02)
+===========================
+
+* Fixed problem when rebuilding the tree from a component with mocked headers.
+
+
+Version 59.3.0 (2014-05-19)
+===========================
+
+* Set LC_ALL=C when parsing svn info to avoid trouble with localized SVN
+  messages.
+* Added _FORTIFY_SOURCE=2 define for compilation on host (except unit tests,
+  mocks and 3pp code) to turn on useful compilation warnings only activated
+  when fortification and optimization are enabled.
+* Made compiler options for buffer overflow detection and stack protection
+  opt-in for STB toolchains except hi3716 by setting USE_HARDENING.
+* Made compiler options for buffer overflow detection and stack protection
+  opt-out for the host toolchain by setting NO_HARDENING.
+* New Python toolchain 2.1.0 with support for PySNMP and PyASN1.
+* Dist observer adapter classes of TOI internal interfaces.
+* Clarified documentation on what libraries to add to INTERFACE_LIBS.
+
+
+Version 59.2.2 (2014-05-16)
+===========================
+
+* Fixed linking problem, see KREATV-24588. Made sure that makesystem unittest
+  c++ code is linked with g++.
+* Fixed createmock's search for dependent interfaces, see KREATV-24595.
+* Fixed createmock to allow both EXPORT and LOCAL declared interfaces.
+* Refactored createmock regular expression matching to use named groups.
+* Fixed faulty symbol visibility macro definition expansion, see KREATV-24608.
+
+
+Version 59.2.1 (2014-05-13)
+===========================
+
+* Added dependency support for mock header files.
+
+
+Version 59.2.0 (2014-05-09)
+===========================
+
+* Initial support for symbol hiding. See USE_SYMBOL_VISIBILITY_HIDDEN
+  and NO_SYMBOL_VISIBILITY_MACROS in the documentation.
+
+
+Version 59.1.2 (2014-05-06)
+===========================
+
+* Added support for HMC3716 platform klibc compiling
+
+
+Version 59.1.1 (2014-04-30)
+===========================
+
+* Updated ARRIS copyright information.
+
+
+Version 59.1.0 (2014-04-15)
+===========================
+
+* Added support for multiple Quilt guards for a series file patch entry.
+
+
+Version 59.0.0 (2014-04-14)
+===========================
+
+* Removed obsolete TOI_OBJECT_NAMES variable and generation of an empty
+  *ObjectNames.h file.
+* Removed HOST_LDFLAGS since --hash-style=sysv has been default for some time
+  and older Fedoras are not supported.
+* Require an INTERFACE_PATH for INTERFACE_HEADERS.
+
+
+Version 58.2.2 (2014-04-14)
+===========================
+
+* Don't remove IIP from IIP collections when parsing bootimage config file if
+  the purpose of parsing is to build requires.
+
+
+Version 58.2.1 (2014-03-31)
+===========================
+
+* Add new kernel(3.10) include path for HI3716_TOOLCHAIN_NAME.
+
+
+Version 58.2.0 (2014-03-24)
+===========================
+
+* Use boot image config parser from BSG's bootimage/tools/BootImage/Config.pm
+  in build_requires.
+
+
+Version 58.1.0 (2014-03-19)
+===========================
+
+* Remove empty (unused) TARGET_OBJS_DIR directories after local_all.
+* Let dist_targets reject all destination paths with whitespace. Previously
+  only paths explicitly passed as arguments were checked.
+* Rebuilt config.cache.
+* Added USE_SYSTEM_TOOLCHAIN_FOR_HOST to make it possible to use the system
+  installed toolchain for host builds.
+* Adding bi:host to valid open source notice targets in order for boot image
+  "pckreatv" to build.
+* Don't try to parse 3PPLICENSE~ and KTVLICENSE~ files (backup files from
+  Emacs).
+
+
+Version 58.0.1 (2014-03-06)
+===========================
+
+* Use gcov from host toolchain.
+
+
+Version 58.0.0 (2014-03-06)
+===========================
+
+* Use new host toolchain (1.0.0).
+
+
+Version 57.1.4 (2014-02-27)
+===========================
+
+* Fixed so that createmock only generates one mock method for each unique
+  signature. See KREATV-23312.
+
+
+Version 57.1.3 (2014-02-25)
+===========================
+
+* Refactored variables related to MODULE_LINK.
+* Correctly detect "Intel 80386" binaries in strip_tree.
+* Exported path to ST-specific ksymhash tool as KSYMHASH.
+* Improved error messages in build_requires.
+* Explicitly define _GNU_SOURCE.
+
+
+Version 57.1.2 (2014-01-31)
+===========================
+
+* Made binary_file work with absolute paths to brefs.
+* Improved output from check_3pp_ktv_license to follow makesystem progress
+  message format.
+
+
+Version 57.1.1 (2014-01-29)
+===========================
+
+* Added KreaTV::warning method.
+
+
+Version 57.1.0 (2014-01-29)
+===========================
+
+* Added new toolchain for hi3716.
+* New toolchain target:
+   HI3716_TOOLCHAIN_NAME
+* New target name:
+   TARGET_NAME_HMC3000
+
+
+Version 57.0.1 (2014-01-28)
+===========================
+
+* Fixing a problem concerning not finding opensourcenotice.config until
+  makesystem has been built.
+
+
+Version 57.0.0 (2014-01-27)
+===========================
+
+* The check_3pp_license has been rewritten from scratch and renamed to
+  check_3pp_ktv_license. It is using the new Python module license_parser to
+  read the 3PPLICENSE/KTVLICENSE files of a component in order to validate
+  content and structure. It then verifies the checksums of the component's
+  binaries.
+* The install_parts script has been split into install_parts and
+  install_licenses. install_licenses is called from install_parts and
+  bootimage/iip/iip_data_build. The call from iip_data_build is done to package
+  3PPLICENSE files with kit IIPs.
+* A config file, opensourcenotice.config, is generated and disted to be used
+  when open source notices are generated. It contains a list of valid notice
+  targets. 3PPLICENSE/KTVLICENSE files can optionally specify an attribute
+  TARGET, which is used to determine whether to include or exclude the license
+  information when building an open source notice. A specific subset of targets
+  from this list of valid notice targets are supplied when building a
+  bootimage. A different subset will be used when building an SDK.
+* Toolchains for st40 and bcm45 have been built with updated 3PPLICENSE
+  information.
+
+
+Version 56.1.1 (2013-12-18)
+===========================
+
+* Made build_requires tests stable on Perl 5.18.
+
+
+Version 56.1.0 (2013-12-12)
+===========================
+
+* Log the time it takes to run tests.
+* Fixed bashisms.
+* Added support for setting LDLIBS in Makefiles.
+* Only serialize submakes if PARALLEL_3PP is set.
+
+
+Version 56.0.1 (2013-12-06)
+===========================
+
+* Added a @class attribute to the makesystem mmd file. This solves an error in
+  the formatting of a table.
+
+
+Version 56.0.0 (2013-11-22)
+===========================
+
+* Removed TARGET_NAME_DCX3210, TARGET_NAME_DCX35XX, TARGET_NAME_IP800,
+  TARGET_NAME_IP805, TARGET_NAME_SXG and TARGET_NAME_VMS610.
+
+
+Version 55.1.0 (2013-11-19)
+===========================
+
+* Expose BUILD_BIN_TARGET[_<target>], BUILD_LIB_A_TARGET[_<target>],
+  BUILD_LIB_SO_TARGET[_<target>] and BUILD_TEST_TARGET to Makefiles so that
+  they don't have to guess where BUILD_BIN and friends place the output.
+* Fixed problem with .sources handling in combination with creation of
+  .katt_metadata. Also made sure to only trigger rebuild due to new sources in
+  the setup phase to avoid parallel build problems.
+
+
+Version 55.0.1 (2013-11-08)
+===========================
+
+* Rebuild the sandbox if the set of enabled targets has changed.
+
+
+Version 55.0.0 (2013-11-04)
+===========================
+
+* Added rules to create KATT test case metadata when building a component,
+  thereby also verifying KATT keyword correctness.
+* The environment variable PYTHONDONTWRITEBYTECODE is now set by default to
+  avoid writing .pyc files to dist (or other places).
+
+
+Version 54.0.2 (2013-11-01)
+===========================
+
+ * Reverted -m4-300 for all ST40 code since it caused FPU bug in when loading
+   the Broadcom WiFi driver.
+
+
+Version 54.0.1 (2013-10-31)
+===========================
+* Rebrand company name from Motorola to Arris.
+
+
+Version 54.0.0 (2013-10-29)
+===========================
+
+* Use -m4-300 for all ST40 code.
+* Improved build_requires algorithm for parsing config file dependencies,
+  resulting in significant speedup (about a factor 20 for the top component).
+* Fixed bug in strip_tree's detection of whether to use the host or non-host
+  version of strip.
+* Updated URLs to the KreaTV wiki.
+* Made build.mk handle generated input files better.
+* Reduced unittest output spam by making destructor mocking opt-in in automatic
+  mocks.
+* Clean up temporary dirs properly in install_toolchain.
+* Bug fix in logic for when to build COMPONENT_TARGET_AVR.
+
+
+Version 53.1.0 (2013-10-29)
+===========================
+
+* Added support for AVR targets.
+
+
+Version 53.0.4 (2013-10-18)
+===========================
+
+* Went further than the change in 53.0.3 and simply prevented the contents of
+  host binaries to influence the test archive digest, since there seems to be
+  quite a few discrepancies between how ELFs look like on some older build
+  servers compared to how they look on newer build servers.
+
+
+Version 53.0.3 (2013-10-17)
+===========================
+
+* Improved digest produced by digest/test-archive-digest by removing the impact
+  from the ".comment" section of host ELF binaries (in these binaries, the
+  section contains the build host's GCC version, which obviously might be
+  different for different build hosts).
+
+
+Version 53.0.2 (2013-10-17)
+===========================
+
+* Copy license file from non-3pp directory if it embeds 3pp license.
+* Added new keyword COMPONENT_EMBEDS_3PP.
+
+
+Version 53.0.1 (2013-09-26)
+===========================
+
+* Fixed bug where on-demand boot images weren't possible to build from
+  the web interface (introduced by the ALWAYS_BUILD-related fix in 52.1.0).
+
+
+Version 53.0.0 (2013-09-26)
+===========================
+
+* Stabilized linker output for components using wildcard sources by sorting
+  file lists after wildcard expansion.
+* Clarified documentation on TARGET_NAME_STB_NOARCH.
+* New Python toolchain 2.0.0:
+  - Renamed from motorola to kreatv.
+* Remove *.pyc files when cleaning makesystem.
+* Support wildcards in BUILD_TEST_EXCLUDE.
+* Improved GCOV parsing and classification of components.
+* When executing KATT tests, append to existing KATT log files if
+  environment variable PRESERVE_LOGS is set.
+* Make it possible to set FLAVOUR on the command line when using HACK_TARGETS.
+* Use CPPFLAGS for -I and -D related flags.
+* Made "make most" work as expected when executed in a bootimage or kit
+  component.
+
+
+Version 52.1.0 (2013-09-23)
+===========================
+
+* Stabilized linker output for components using wildcard sources by sorting
+  file lists after wildcard expansion.
+* Added new BOOT_IMAGE_PRODUCTS value "digests". When a boot image component
+  includes this token in BOOT_IMAGE_PRODUCTS, two .digest files will be
+  generated (one for the rootdisk and one for the kernel). These contain a
+  summary of what the runnable products contain. The value is in experimental
+  stage and so far only supported for vip28x3 devices. See KREATV-18260.
+* Fixed so that ALWAYS_BUILD has a proper default value in generated boot image
+  description files (JSON formatted).
+
+
+Version 52.0.2 (2013-09-10)
+===========================
+
+* Make tree rule of make clean serialized like make all.
+* Update the kit.mk to adapt to putting test dir in to dist dir.
+
+
+Version 52.0.1 (2013-09-02)
+===========================
+
+* Replaced bashism in RESTORE_PATCH_OPTS and MODULE_LINK with POSIX compatible
+  equivalent.
+* Don't rely on /usr/bin/time being present.
+* Generate ARRIS copyright header in automatic mocks.
+* Include 3pp headers with -isystem to avoid build warnings outside our
+  control.
+* Documented and clarified NOT_SUITABLE_FOR_UNIT_TESTS.
+* Improved documentation on make goals.
+* Rebuilt config.cache.
+
+
+Version 52.0.0 (2013-08-30)
+===========================
+
+* Renamed toolchains from motorola to kreatv.
+  - Toolchain 4.0.0 for st40
+  - Toolchain 3.0.0 for bcm45
+
+
+Version 51.0.0 (2013-08-29)
+===========================
+
+* Replaced KIT_ALWAYS_BUILD and BOOT_IMAGE_ALWAYS_BUILD with ALWAYS_BUILD.
+* Added make target "most" which doesn't build kits or boot images
+  with ALWAYS_BUILD = false.
+* Removed targets: kit, bootimage, local_kit and local_boot_image
+
+
+Version 50.1.1 (2013-08-23)
+===========================
+
+* Raised maximum number of mock method arguments to 20.
+
+
+Version 50.1.0 (2013-08-19)
+===========================
+
+* Added BOOT_IMAGE_USE_DEBUG_KERNEL to make the boot image use the debug
+  kernel.
+
+
+Version 50.0.0 (2013-07-08)
+===========================
+
+* Introducing new documentation system
+* Removed BUILD_DOCPART_STATIC_FILES
+* Added BUILD_DOCPART_TOC_FILE and BUILD_DOCPART_LOCAL_INSTALL
+  to enable pre/post processing of files in Makefiles.
+* Always preserve source dir for DOC_TARGETS in "dev" path when using
+  build.mk
+* "Disting" copies of generated documentation into a local directory
+  called .docdist used by the documentation editor.
+
+
+Version 49.0.2 (2013-07-05)
+===========================
+
+* Avoid warnings about overridden mock rules when a header file is mentioned
+  multiple times in MOCKED_HEADERS or MOCKED_INTERFACE_HEADERS.
+* Improved error message when build_requires can't find an IIP.
+* Added check that CCACHE_DIR exists and is usable.
+
+
+Version 49.0.1 (2013-07-03)
+===========================
+
+* Don't strip/objcopy files from lib/firmware
+
+
+Version 49.0.0 (2013-07-02)
+===========================
+
+* Removed VIP10X2 target and BCM74XX toolchain.
+* Removed umbrella target TARGET_NAME_BCM; use TARGET_NAME_BCM45 instead.
+
+
+Version 48.6.8 (2013-07-01)
+===========================
+
+* Allow unittest code to test the implementation of deprecated TOI/TEI methods.
+  The declaration of these methods are marked with __attribute__((deprecated))
+  by the IDL compiler.
+
+
+Version 48.6.7 (2013-06-24)
+===========================
+
+* Require ccache 3.1.9 or later because of a bug in 3.1.7 and 3.1.8.
+
+
+Version 48.6.6 (2013-06-19)
+===========================
+
+* Tweaks of how pthread is linked to fix build problems on Ubuntu.
+
+
+Version 48.6.5 (2013-06-04)
+===========================
+
+* Minor makesystem documentation update explaining when/how boot images are
+  built.
+
+
+Version 48.6.4 (2013-06-03)
+===========================
+
+* Generated metadata files for boot image components for use in server-side
+  builds of on-demand boot images. Also disted on-demand boot image
+  configurations for the same reason.
+* Fixed so that device-specific directory in dist containing kernels and such
+  isn't used as --source for host boot image builds (e.g. pckreatv).
+* Fixed so that binary files are downloaded if building a component using
+  local_boot_image (like is done for the common local_all case). This means
+  that configuration files of on-demand boot images can reference binary files
+  and still build.
+* Use system provided ccache version 3.1.4 (or higher). If ccache is either
+  not installed or a lower version then fall back to use ccache-motorola. See
+  KREATV-1473 for more information.
+
+
+Version 48.6.3 (2013-05-24)
+===========================
+
+* Updated wiki hostname in makesystem documentation.
+
+
+Version 48.6.2 (2013-05-16)
+===========================
+
+* Updated bcm45 toolchain to version 2.0.2
+
+
+Version 48.6.1 (2013-05-10)
+===========================
+
+* An additional boot image product, lib dependency info (kreatv-libdep-*.txt)
+  which is generated after the boot image finishes its build.
+
+
+Version 48.6.0 (2013-05-02)
+===========================
+
+* Fixed so that unit test coverage does not include .h files.
+* Unconditionally link with -lpthread.
+* Removed unneeded setup of LD_LIBRARY_PATH.
+* Create missing parent directory when building .no files.
+
+
+Version 48.5.1 (2013-04-16)
+===========================
+
+* Export CCACHE variable when running kit tests.
+
+
+Version 48.5.0 (2013-03-28)
+===========================
+
+* Prefer using the host toolchain in the check-syntax rule so that Emacs's
+  flymake-mode works in unit tests as well.
+* Moved the environment check from install_toolchain to a separate script,
+  check_env.
+* Introduced a global config.cache file and a script for generating such a
+  file. The global config.cache file can be used to speed up the configure step
+  of 3pps.
+
+
+Version 48.4.2 (2013-03-28)
+===========================
+
+* Always include device specific library paths before toolchain specific ones.
+
+
+Version 48.4.1 (2013-03-27)
+===========================
+
+* Added an '--info configuration ...' build_boot_image argument when generating
+  the build_boot_image-wrapper. Hopefully this fixes the
+  tc_fetch_platform_settings.py (KATT level 2) test regression introduced in
+  makesystem 48.4.0.
+
+
+Version 48.4.0 (2013-03-25)
+===========================
+
+* Added makesystem/bootimage.mk which contains commonly used (duplicated) parts
+  of boot image makefiles. Boot image components now declare a set of
+  BOOT_IMAGE_xyz variables and then include bootimage.mk.
+* Added support for building boot images on-demand in a working copy by
+  introducing two new make targets for components using bootimage.mk:
+  - 'boot_image' (recursive), and
+  - 'local_boot_image' (non-recursive).
+
+See KREATV-13869 and the makesystem documentation for more information.
+
+
+Version 48.3.2 (2013-03-19)
+===========================
+
+* Toolchain 3.2.0 for st40.
+
+
+Version 48.3.1 (2013-03-07)
+===========================
+
+* TARGET{,_3PP}_DIST_DIR -> TOOLCHAIN{,_3PP}_DIST_DIR
+* Renamed options of the iip/kit build scripts
+  - renamed --processor to --toolchain.
+  - renamed --hw_comp to --device.
+  - renamed --hw to --architecture.
+* Used TOOLCHAIN_3PP_DIST_DIR in all KLIBC-variables.
+
+
+Version 48.3.0 (2013-03-01)
+===========================
+
+* Changed the behaviour of how parallel builds are performed:
+  - 3pp components are built in parallel until a submake is called.
+  - Submakes in 3pp components are serialized unless PARALLEL_3PP is set.
+  - NO_PARALLEL is removed since all components should be able to build in
+    parallel. (For testing use "MAKEFLAGS += -j1" and/or ".NOTPARALLEL:".)
+* Files included in boot image configuration files with @include are now
+  added to .requires_depend.
+* Removed reference to Linköping-specific ~tools directory.
+
+
+Version 48.2.0 (2013-02-27)
+===========================
+
+* Added optional encoding parameter to KreaTV::{read,write}_file_content.
+* Added KreaTV::require_module method.
+
+
+Version 48.1.1 (2013-02-08)
+===========================
+
+* Add -fno-use-cxa-atexit for toi plugin as a workaround to fix static
+  variable memory leak in dynamic libraries (only for ST40).
+
+
+Version 48.1.0 (2013-02-06)
+===========================
+
+* Exported PYTHON_TOOLCHAIN_PATH for usage by Makefiles. This also makes
+  componentcache include the Python toolchain in component hashes.
+* Modernized config.sub.
+* Made get_version aware of deadwood. Fixes KREATV-11197.
+* Corrected include of generated mock when the mocked header file is in a
+  subdirectory.
+* Removed obsolete references to VIP19X0.
+* Generated files from unit tests are now removed when cleaning.
+* Fixed race condition when installing header files in components with
+  component target TARGET_NAME_HOST when neither BUILD_TEST nor BUILD_STB_HOST
+  is enabled in platforms.mk.
+
+
+Version 48.0.1 (2013-01-30)
+===========================
+
+* Count testable lines in untested files, and show coverage 0% for them.
+* Show coverage "N/A" for components with "NOT_SUITABLE_FOR_UNIT_TESTS = true"
+
+
+Version 48.0.0 (2013-01-23)
+===========================
+
+* New makesystem variables:
+  - MOCKED_HEADERS: Lists header files (not in INTERFACE_HEADERS) for which to
+    create mocks automatically.
+  - MOCKED_INTERFACE_HEADERS: Lists header (in INTERFACE_HEADERS) for which to
+    create mocks automatically.
+  - MOCK_OBJS: Contains object files for local mocks.
+* Obsolete makesystem variables:
+  - MOCK_TARGETS: MOCKED_HEADERS and/or MOCKED_INTERFACE_HEADERS should be
+    defined instead.
+  - INTERFACE_MOCKS: MOCKED_INTERFACE_HEADERS should be defined instead.
+* Added separate compilation of mock constructors and destructors for increased
+  build speed.
+* Object files for mocks of MOCKED_HEADERS are only compiled locally.
+  $(MOCK_OBJS) should be added as a dependency of the unittest binary. (This is
+  automatically done when using build.mk.)
+* Object files for mocks of MOCKED_INTERFACE_HEADERS are compiled locally and
+  put in a library called libmocks_<component>.a, which is disted.
+  build_requires makes sure to automatically add all needed mock libraries in
+  .requires_setup.
+* Improved mock generator to:
+  - Generate a TMock*.cpp file for separate compilation.
+  - Generate mocks in the same namespace as the mocked class(es).
+  - Find methods for inherited classes in any of the included files.
+  - Ignore __attribute__((...)) specifications.
+  - Know that "void Foo(void)" means "void Foo()".
+  - Generate a Die() method for verifying mock destruction.
+* Added unit tests for the new functionality in build_requires.
+* Removed an unnecessary $(MAKE) call when disting headers.
+* Improved pretty-printing of top component in progress messages.
+
+
+Version 47.8.9 (2013-01-11)
+===========================
+
+* Bumped Python toolchain to version 1.3 in which the openssl executable has
+  been removed. Fixes KREATV-12763.
+
+
+Version 47.8.8 (2013-01-11)
+===========================
+
+* Remove .requires_list when cleaning.
+* Made "make help" print doc/README.mmd instead of failing.
+
+
+Version 47.8.7 (2012-12-18)
+===========================
+
+* Made unit test of createmock work regardless of current year.
+
+
+Version 47.8.6 (2012-12-17)
+===========================
+
+* Toolchain 3.1.1 (fix for a multiplication bug) for ST40.
+
+
+Version 47.8.5 (2012-12-12)
+===========================
+
+* Updated the script for generating build scripts for kits. There is a new
+  way for calling the test program after a kit has finished building.
+* Removed PRE_BUILD and POST_BUILD which were used to execute rules before or
+  after a build.
+
+
+Version 47.8.4 (2012-12-12)
+===========================
+
+* Minor tweaks of generated Google Mock code.
+
+
+Version 47.8.3 (2012-12-05)
+===========================
+
+* Added documentation of MOCK_TARGETS.
+* Disable componentcache when GCOV is enabled. (Binaries built with GCOV flags
+  produce .gcda files in the directory of the original source files, which
+  does not work well with component caching.)
+
+
+Version 47.8.2 (2012-11-30)
+===========================
+
+* Fix build problem with mock generation when disabling test target.
+* Don't leave bad mock files when generation fails.
+* Updated toolchain mmd.
+
+
+Version 47.8.1 (2012-11-26)
+===========================
+
+* Documentation changes: Added info to Makefile checklist:
+    Make sure you have correct REQUIRES set up. You should be able to run make
+    in your new component in an unbuilt tree where all targets but one are
+    disabled.
+
+
+Version 47.8.0 (2012-11-23)
+===========================
+
+* Added automatic generation of mock files:
+
+  MOCK_TARGETS = mocks/TMockFoo.h
+
+  will generate gmock interface from IFoo.h or TFoo.h in that order.
+
+
+Version 47.7.0 (2012-11-22)
+===========================
+
+* Added IP805 target.
+
+
+Version 47.6.0 (2012-11-22)
+===========================
+
+* Toolchain 3.1.0 (GCC 4.7.2) for ST40.
+
+
+Version 47.5.3 (2012-11-20)
+===========================
+
+* Added link script for kernel modules to make external built Linux 3.x modules
+  handle exported symbols correct.
+
+
+Version 47.5.2 (2012-11-19)
+===========================
+
+* Fixed variable sanity check when using BUILD_LIBS_A.
+* Disable SCU when GCOV is enabled so that coverage measurement is done
+  correctly.
+* Only build IDL mocks when BUILD_TEST is enabled.
+
+
+Version 47.5.1 (2012-11-14)
+===========================
+
+* Added -Wformat-security.
+* Added -fstack-protector-all --param ssp-buffer-size=4 for host builds.
+
+
+Version 47.5.0 (2012-11-06)
+===========================
+
+* New toolchains for bcm74xx (version 3.0.0), bcm45 (version 2.0.0) and st40
+  (version 3.0.0). Toolchain-level Linux kernel headers are now available in
+  the toolchain. This also means that the toolchains are usable on their own
+  now, without an accompanying SDK.
+* Dist .install_depends files so that they can be used by check_requires.
+
+
+Version 47.4.0 (2012-11-01)
+===========================
+
+* Added SXG target.
+
+
+Version 47.3.1 (2012-10-25)
+===========================
+
+* Fixed parallel build race in components with flavours when building with
+  USE_GCOV.
+* General cleanup of gcov-related code and rules.
+
+
+Version 47.3.0 (2012-10-23)
+===========================
+
+* bcm45 toolchain upgrade to 1.0.4 (stbgcc-4.5.3-2.4)
+
+
+Version 47.2.3 (2012-10-19)
+===========================
+
+* Enables disting of kit build scripts for all kits, not just "on-demand" kits.
+  All build scripts are required for the build server to be able to build
+  ad-hoc kits (kit extensions) of all kits.
+
+
+Version 47.2.2 (2012-10-18)
+===========================
+
+* Fixed race condition when compiling caller factory mock object file.
+* Remove generated IDL mocks when cleaning.
+
+
+Version 47.2.1 (2012-10-16)
+===========================
+
+* If NO_TESTS is defined, no test targets will be run.
+
+
+Version 47.2.0 (2012-10-04)
+===========================
+
+* Defines for enabling large file APIs (_FILE_OFFSET_BITS=64, _LARGEFILE_SOURCE
+  and _LARGEFILE64_SOURCE) are now set for non-3pp components.
+* __STDC_FORMAT_MACROS is also defined for non-3pp components to enable PRIu64
+  and friends out of the box.
+* Fixed race condition between the SCU mechanism and .bref scanning.
+* Ignore trailing whitespace in BUILD_* variables from platform.mk.
+* Made install_toolchain work with Python 2.4.
+
+
+Version 47.1.1 (2012-09-26)
+===========================
+
+* Enabled kits to be built with multiple toolchains using kit.mk.
+
+
+Version 47.1.0 (2012-09-25)
+===========================
+
+* Added support for separate compilation of mocks of IDL interfaces to speed up
+  builds. New exported variables:
+
+  - DEBUG_FLAGS: Debug flags to use for C/C++ compilation. Defaults to "-g".
+  - RPC_SRCS: Same as previous rpc_srcs but with the uppercase officialness.
+  - RPCMOCK_SRCS: Internal IDL mock source code files.
+  - RPCMOCK_OBJS: Internal IDL mock object files.
+  - IDLMOCK_SRCS: TOI/TEI IDL mock source code files.
+  - IDLMOCK_OBJS: TOI/TEI IDL mock object files.
+* Added more protection against strange race condition in SCU mechanism.
+* Build unit tests without optimization (only for components using build.mk).
+  This improves round trip time when developing unit tests.
+* Fixed colorization of warning about disabled tests.
+* Added documentation for NO_AS_NEEDED.
+
+
+Version 47.0.1 (2012-09-19)
+===========================
+
+* A speedup for the kit sanity check. By using external iip info, which is
+  outputed by <bsg>/bootimage/iip/iip_build and then disted, the sanity
+  check does not have to unpack the contents of an IIP to read info.xml
+  and other info items.
+
+
+Version 47.0.0 (2012-09-18)
+===========================
+
+* Added support for *.s.
+* Add -mno-abicalls to NOPIC when building with BCM45 toolchain.
+* Modified build_requires to support USE_KLIBC.
+
+
+Version 46.0.1 (2012-09-13)
+===========================
+
+* Added support for xz compressed files in UNPACK_SRC_ARCHIVE.
+* Added toolchain documentation.
+
+
+Version 46.0.0 (2012-09-10)
+===========================
+
+* Added DCX3210 target.
+* Removed KE100 target.
+
+
+Version 45.0.5 (2012-09-07)
+===========================
+
+* KREATV-431: Registered every deliverable kit component (on-demand kit or not)
+  using a JSON file which holds some kit metadata. These files are then merged
+  together by the products/kits/build-server-support component and the
+  resulting file is used by the build system. Before this change, only
+  on-demand kits where registered (using an ad-hoc text format).
+
+
+Version 45.0.4 (2012-09-04)
+===========================
+
+* If the log file exists for a component, during daily build, then don't launch
+  make again for that component.
+
+
+Version 45.0.3 (2012-09-03)
+===========================
+
+* Update for IDL caller factory method generation (KREATV-758). A new variable
+  must be set by makefiles to generate caller factory for internal IDLs:
+  RPC_COMPONENT (name of internal IDL component).
+* Update for suppressible observer callbacks generation (KREATV-575).
+* Update for new service IPC framework (KREATV-871).
+* Let dist_targets avoid copying if source and destination files have the same
+  time stamp and file size.
+* Print Google Test message "YOU HAVE <n> DISABLED TEST(S)" even in non-verbose
+  mode.
+
+
+Version 45.0.2 (2012-08-30)
+===========================
+
+* Fixed typos which caused kit.mk to omit a sanity check of on-demands kits'
+  configuration files. See BUGZ:23601.
+
+
+Version 45.0.1 (2012-07-11)
+===========================
+
+* Cleanup of progress messages.
+* Documented rule about only building stuff in leaf components.
+* Explicitly use --no-as-needed if NO_AS_NEEDED is set since --as-needed is
+  default on some newer toolchains/platforms.
+
+
+Version 45.0.0 (2012-07-05)
+===========================
+
+* Removed VIP19X0 target.
+
+
+Version 44.0.0 (2012-07-02)
+===========================
+
+* Removed VIP22X2 target.
+* Fixed regression in 40.0.0: Download and install toolchains without breaking
+  parallel builds.
+
+
+Version 43.0.0 (2012-06-28)
+===========================
+
+* This version is identical to 41.1.0.
+
+
+Version 42.0.0 (2012-06-28)
+===========================
+
+* Removed VIP19X0 target.
+* This version should not be used. It was rolled back because of failing KATT
+  tests.
+
+
+Version 41.1.0 (2012-06-26)
+===========================
+
+* Toolchain 2.5.0 (GCC 4.6.3) for ST40.
+
+
+Version 41.0.0 (2012-06-20)
+===========================
+
+* Added support for building kits on demand. See KREATV-93.
+* Moved logic for building kit components from build.mk into a new file kit.mk.
+* Added generate_kit_build_script.
+
+
+Version 40.3.0 (2012-06-11)
+===========================
+
+* Toolchain 2.4.0 (uClibc 0.9.33) for st40.
+* Only include device specific linux includes when building modules.
+
+
+Version 40.2.3 (2012-06-08)
+===========================
+
+* Improved error messages in build_sandbox.
+* Added some documentation of the sandbox feature.
+* Renamed "convenience targets" to "umbrella targets".
+
+
+Version 40.2.2 (2012-05-28)
+===========================
+
+* Updated BCM45 toolchain to version 1.0.3
+
+
+Version 40.2.1 (2012-05-09)
+===========================
+
+* Add environment checks to install_toolchain to help user identify
+  and avoid problems related to the environment in which the toolchain
+  is installed. Specifically, bash shell, Python 2 and 32-bit C
+  libraries are required to use the toolchains.
+
+
+Version 40.2.0 (2012-04-28)
+===========================
+
+* Integrate Klocwork code analysis tool into makesystem using KLOCWORK flag.
+  New usage: KLOCWORK=1 make local_all
+             KLOCWORK=1 make
+
+
+Version 40.1.0 (2012-04-27)
+===========================
+
+* Implement sandbox, which contains links to files distributed by dependencies
+  specified in REQUIRES of current building component.
+* By limiting INCPATH or LIBPATH to sandbox, current building component is
+  exposed with only required parts of dist directory.
+* By default, sandbox is applied to only 3pp components and contains only
+  links to required library files.
+* If variable USE_FULL_SANDBOX is set, sandbox is applied to all components,
+  and contains links to everything distributed by components required.
+
+
+Version 40.0.2 (2012-04-26)
+===========================
+
+* Added bref.mk, which may be used if only the .bref-related parts of
+  makesystem are wanted.
+* Fixed race condition where execution of the unit test binary could fail
+  because of missing locally built library.
+
+
+Version 40.0.1 (2012-04-24)
+===========================
+
+* Bumped Python toolchain to 1.2 which fixes the problem of not being able
+  to use the ssl module on some Linux distributions (BUGZ:19422) due to
+  dependencies on the host machine's OpenSSL installation. With 1.2, OpenSSL
+  1.0.1 is embedded in the toolchain. 1.2 also bumps the Python version from
+  2.7.2 to 2.7.3.
+* Fix so that it's once again possible to specify an explicit TARGET on the
+  command line (this got broken in 40.0.0).
+
+
+Version 40.0.0 (2012-04-12)
+===========================
+
+* What previously was called target in the hardware/STB sense is now called
+  "device".
+* Component Makefiles still contain a component targets list, which now may
+  contain any combination of targets.
+* $(TARGET) is set to the current target, regardless of whether it's a
+  toolchain or device level target. The $(TOOLCHAIN), $(DEVICE) and $(TARGET)
+  variables can be used for conditional building.
+* BUILD_TESTS has been renamed to BUILD_TEST in platforms.mk so that all
+  BUILD_<x> match TARGET_NAME_<x>.
+* Lots of cleanups, removing duplicated code.
+* Removed obsolete sanity checks for makesystem/targets.mk.
+* Fixed so that TARGET_NAME_STB_NOARCH actually only is built when at least one
+  STB target is enabled.
+
+
+Version 39.2.1 (2012-03-29)
+===========================
+
+* Let dist_targets use "cp -p" to copy files to avoid executable flag sometimes
+  being lost for disted files.
+
+
+Version 39.2.0 (2012-03-28)
+===========================
+
+* Removed SVR15, IP700, DCX3200P3 and SVR610 targets.
+
+
+Version 39.1.2 (2012-03-19)
+===========================
+
+* Fixed race condition in the ENABLE_SCU macro.
+* Fixed problem with the executable flag for a disted file being lost when
+  rebuilding a component in some scenarios.
+
+
+Version 39.1.1 (2012-03-13)
+===========================
+
+* Updated bcm45 toolchain version to 1.0.2.
+  This fixes missing scsi headers from uClibc.
+
+
+Version 39.1.0 (2012-03-07)
+===========================
+
+* Depend on PATCHES_DEP in the setup phase so that patches that need to be
+  built (if any) are there in the target-specific phase.
+* Automatically unpack bz2-compressed patches.
+* Made MODULE_LINK ensure that the destination directory exists.
+* Improved dist_targets to avoid unnecessary rebuilds due to the improved
+  update rebuild behavior introduced in 34.2.0.
+* Fixed binary_file for Subversion 1.7 working copies.
+* Fixed so that generated CPP/JS IDLs only are disted when needed.
+* Fixed race condition when creating .sources in IDL components (hopefully).
+* Only skip actually created build directories when building requires.
+* Set maximum page size to 4096 for bcm45.
+* Multiple libraries in each row of INTERFACE_LIBS are now understood.
+
+
+Version 39.0.0 (2012-03-05)
+===========================
+
+* Removed LINK_JAR variable.
+* Removed implicit .java --> .class rules.
+* Added BUILD_JAR variable. This recipe creates the archive $@ from the .java
+  sources $^ by compiling all .java files using a single javac invocation (to
+  avoid parallel build errors such as those described in BUGZ:19158) and
+  then creating the archive from the resulting .class files.
+
+
+Version 38.1.0 (2012-03-02)
+===========================
+
+* Moved non-constant ST40/BCM74XX/BCM45_TARGET_VERSIONS variables from
+  constants.mk to targetsetup.mk. Added corresponding real constants
+  to constants.mk called ST40/BCM74XX/BCM45_TARGETS.
+
+
+Version 38.0.1 (2012-02-28)
+===========================
+
+* Bumped Python toolchain to 1.1. The new toolchain contains three additional
+  packages: pexpect, imaging and numpy. These are needed for some of the KATT
+  tests when running them through the makesystem. (When running them through
+  KATT, the makesystem/Python toolchain isn't used.)
+
+
+Version 38.0.0 (2012-02-27)
+===========================
+
+* Added support for new Python toolchain. Prefixed PATH with toolchain's bin
+  dir.
+* Introduced new variable 'PYTHON2' which allows users to get the interpreter
+  path. Useful for interactive sessions and prototyping.
+* Removed 'IDL_TOOLCHAIN_xyz' variables. The IDL toolchain isn't used any more;
+  the omniORB libraries have been integrated into the new Python toolchain. The
+  'omnipython' process (Python 1.5 interpreter) isn't used anymore.
+
+
+Version 37.0.4 (2012-02-24)
+===========================
+
+* Fixed debug archive creation.
+* Build IP800 by default.
+
+
+Version 37.0.3 (2012-02-20)
+===========================
+
+* Don't try to download toolchains when building from OSSK.
+* No longer require /usr/bin/dot from the graphviz package.
+
+
+Version 37.0.2 (2012-02-18)
+===========================
+
+* Add support for compiling *.cc files.
+
+
+Version 37.0.1 (2012-02-16)
+===========================
+
+* Temporarily turn off the makesystem/objcopy_tree script to avoid a parallel
+  build issue.
+
+
+Version 37.0.0 (2012-02-15)
+===========================
+
+* Removed TARGET_NAME_ALL and turned TARGET_NAME_ALL_TARGETS into a new,
+  makesystem-internal variable: _target_name_all_targets.
+
+
+Version 36.1.0 (2012-02-15)
+===========================
+
+*  vip25x2 renamed to KE100 and built with BCM45 toolchain.
+
+
+Version 36.0.3 (2012-02-15)
+===========================
+
+* Bug fix in objcopy_tree, avoiding a parallel build issue.
+
+
+Version 36.0.2 (2012-02-10)
+===========================
+
+* Add objcopy_tree.
+
+
+Version 36.0.1 (2012-02-08)
+===========================
+
+* build_requires now skips temporary iip and kit directories.
+
+
+Version 36.0.0 (2012-02-06)
+===========================
+
+* Added support for building development kits through IIPs
+* Added packaging of documentation in IIPs
+* Added @include support in config files
+* IIPs can now be built through direct manipulation of buildtime
+  data directory file contents.
+
+
+Version 35.5.1 (2012-02-01)
+===========================
+
+* Problem with libdepend solved. Dependency libraries were linked in a bad way.
+
+
+Version 35.5.0 (2012-01-25)
+===========================
+
+* Added new target TARGET_NAME_VIP29X2.
+
+
+Version 35.4.1 (2012-01-25)
+===========================
+
+* Added suppression support to Valgrind.
+
+
+Version 35.4.0 (2012-01-19)
+===========================
+
+* Toolchain 2.3.0 (GCC 4.5.3) for ST.
+
+
+Version 35.3.0 (2012-01-06)
+===========================
+
+* DCX35XX, SVR610 and VMS610 are now built with BCM45 toolchain.
+* Added SVR15 target.
+* Do not build SVR610 and IP700 by default.
+
+
+Version 35.2.3 (2012-01-05)
+===========================
+
+* Added internalnode.mk
+
+
+Version 35.2.2 (2012-01-03)
+===========================
+
+* Avoid processing PRODUCT_TARGETS if we are building for host only as a
+  consequence of TEST_TARGETS being non-empty.
+* Misc. minor changes in doxygen configuration used by build.mk.
+
+
+Version 35.2.1 (2011-12-22)
+===========================
+
+* Only dist .jar files once.
+
+
+Version 35.2.0 (2011-12-09)
+===========================
+
+* install_component now always includes noarch and stb-noarch files.
+* Only download STB toolchains for targets enabled in platforms.mk.
+* Removed $(TARGET) part from paths related to klibc since klibc no longer is
+  built per target.
+* Made it possible to fake toolchain installation in install_toolchain. Used by
+  the HDKs.
+* Let build_requires bail out on cycles in REQUIRES.
+
+
+Version 35.1.0 (2011-12-07)
+===========================
+
+* Added VIP28X3 target.
+* Icecream build is only activated if USE_ICECC is set to true.
+* If available, use ksymhash when building modules.
+* Use -fsyntax-only in check-syntax rule.
+* Fix test target setup for check-syntax.
+* Now possible to disable STB_HOST and enable TEST.
+
+
+Version 35.0.2 (2011-11-28)
+===========================
+
+* Added description of Single Compilation Unit in documentation.
+
+
+Version 35.0.1 (2011-11-25)
+===========================
+
+* Changed name of generated single compilation files to start with '.'
+  so that they are ignored by svn.
+
+
+Version 35.0.0 (2011-11-10)
+===========================
+
+* Added support for BCM45 toolchain (gcc-4.5.3).
+* Added support for IP800 target.
+
+
+Version 34.3.0 (2011-11-03)
+===========================
+
+* Added support for building documentation parts to build.mk by introducing
+  BUILD_DOCPART_* variables.
+
+
+Version 34.2.3 (2011-11-01)
+===========================
+
+* Fixed long test execution logic for components that use RUN_TEST_TARGETS
+  instead of defining TEST_TARGETS.
+
+
+Version 34.2.2 (2011-10-31)
+===========================
+
+* Add support for @include in boot image config to build_requires.
+* Add requirement of kit-install scripts to iips.
+
+
+Version 34.2.1 (2011-10-24)
+===========================
+
+* Changed platforms.mk.template ( BUILD_VMS610 = true )
+
+
+Version 34.2.0 (2011-10-13)
+===========================
+
+* Added support for Google Test unit tests.
+* Improved update build behaviour: dist_targets now dists a file even if it is
+  older than the target file in dist and updates mtime if needed.
+* Failed components are now printed at the end of the build to make it easier
+  to understand what went wrong in parallel builds.
+* Removed source file from progress message output; the destination file says
+  enough.
+* Don't run tests on slow build servers for components marked with
+  COMPONENT_LONG_TEST.
+
+
+Version 34.1.0 (2011-10-07)
+===========================
+
+* Use ST toolchain 2.2.0 (uclibc 0.9.32, binutils 2.21.51).
+
+
+Version 34.0.2 (2011-09-28)
+===========================
+
+* Ported information on the MakeSystem wiki page to doc/README.mmd.
+* Moved information in build.md to doc/README.mmd.
+* doc toolchain version 1.0.3 with MultiMarkdown 3.2.
+
+
+Version 34.0.1 (2011-09-28)
+===========================
+
+* Use ST toolchain 2.1.4 (support for DNS timeout).
+
+
+Version 34.0.0 (2011-09-16)
+===========================
+
+* Added doc toolchain containing doxygen and multimarkdown.
+* Removed build_data.xml creation from makesystem (done in BSG instead). This
+  avoids a parallel build race.
+
+
+Version 33.3.2 (2011-09-09)
+===========================
+
+* Changed platforms.mk.template ( BUILD_DCX35XX = true )
+
+
+Version 33.3.1 (2011-09-07)
+===========================
+
+* Changed platforms.mk.template ( BUILD_DCX3200P3 = true )
+
+
+Version 33.3.0 (2011-09-05)
+===========================
+
+* Added target TARGET_NAME_VMS610.
+
+
+Version 33.2.0 (2011-09-05)
+===========================
+
+* Introduction of KATT 2.0
+* Replaced KATT_TESTS with KATT_TARGETS
+* Removed some KATTENV_TARGETS, only to be used in specific places.
+* local katt tests will now behave as similar as possible to the central.
+* Removed obsolete local_katt directory with tools.
+
+
+Version 33.1.2 (2011-08-24)
+===========================
+
+* Allow empty patches/series file to make it easier to start using Quilt in a
+  component.
+
+
+Version 33.1.1 (2011-08-22)
+===========================
+
+* Fixed build warning in proclifetime.c
+* Fixed IDL parallel building problem.
+
+
+Version 33.1.0 (2011-08-18)
+===========================
+
+* Print Linux-style progress messages.
+* Fixed bad .host_ldflags interaction with componentcache.
+* Include signal description in error message printed when proclifetime dies
+  with a signal.
+
+
+Version 33.0.2 (2011-07-08)
+===========================
+
+* Search for noarch and stb-noarch include files.
+
+
+Version 33.0.1 (2011-06-30)
+===========================
+
+* Added toolchain targets to TARGET_NAME_ALL
+* Reenabled support for explicit TARGET setting from command line
+
+
+Version 33.0.0 (2011-06-29)
+===========================
+
+* Removed SPLIT_TARGET support from makefiles. Targets
+  will now be split if there are any single targets
+  listed in a makefile.
+* Removed umbrella targets, such as "TARGET_NAME_VIP1900"
+* Added toolchain targets for generic BCM and ST40 components
+* Added two DCX targets
+* Renamed VIPHOST to STB_HOST and VIP_NOARCH to STB_NOARCH
+* Renamed TARGET_NAME_VIP to TARGET_NAME_STB
+* Cleaned up target setup
+* Fixed various bugs
+
+
+Version 32.0.2 (2011-05-26)
+===========================
+
+* Fixed autolink handling of host targets.
+* Set DT_SONAME when using LINK_SO.
+
+
+Version 32.0.1
+==============
+
+* Internalized doxygen external
+
+
+Version 32.0.0 (2011-05-11)
+===========================
+
+* Added build.mk which provides macros for doing common build tasks.
+  See build.md.
+* Removed __TARGET__, instead test on __VIP19x3__, __HOST__ etc.
+* build_requires is improved to check COMPONENT_TARGETS so that
+  automatic linking is done for the correct targets.
+  Also added INTERFACE_LIBS_<target> syntax to force automatic link
+  for the specified target only.
+  If you still need to remove a library from automatic linking use
+  REMOVE_LIBS = <libs>.
+  There should almost never be any need to do "LDFLAGS += -l<lib>" or
+  "$(LINK) -l<lib>" except for libs that are not handled by the makesystem
+  like libdl.
+* Link with --as-needed, this will make make sure that the linker only includes
+  dynamic libraries that are really needed. There are two common problems
+  caused by this flag:
+  * Some static lib, libA, use symbols from a DSO, libB. When building a binary
+    using libA linking fails even though libB is included in the link.
+    Solution: libA must be linked before libB. Use INTERFACE_LIBS in the build
+    of libA to add needed libraries.
+  * Some DSO, libA, use symbols from another DSO, libB. When building a binary
+    using libA linking fails even though libB is included in the link.
+    Solution: fix libA so that it links with libB.
+  As a last resort --as-needed can be disabled with NO_AS_NEEDED.
+* Keep track of the sources in a component and trigger a rebuild if the sources
+  have changed. This will make it safer to use wildcards.
+* Removed hardcoding of host toolchain in CHK_SOURCES, it will now try to
+  select a proper TOOLCHAIN/TARGET from COMPONENT_TARGETS.
+* Make install_parts and strip_tree honour VERBOSE flag.
+
+
+Version 31.3.0 (2011-04-28)
+===========================
+
+* Added one new target:
+  TARGET_NAME_VIP25X2
+* The new target is part of TARGET_NAME_VIP2000.
+* The new target is part of preparations to integrate KreaTV on new hardware.
+* Added one new variable to platforms.mk.template:
+  BUILD_VIP25X2
+* Updated targetsetup and common to include new target.
+
+
+Version 31.2.0 (2011-04-25)
+===========================
+
+* Added two new targets:
+    TARGET_NAME_SVR610, TARGET_NAME_IP700
+* The two new targets are included as part of TARGET_NAME_VIP.
+* New variable TARGET_NAME_IETV is added to include all IETV targets.
+    TARGET_NAME_SVR610, TARGET_NAME_IP700
+* Added these variables into platforms.mk.template:
+    BUILD_SVR610, BUILD_IP700
+* Updated targetsetup.mk and common.mk to include the IETV targets.
+
+
+Version 31.1.3 (2011-04-14)
+===========================
+
+* Fix dist_targets race that could happen when several dist_targets were
+  installing to the same destination at the same time.
+
+
+Version 31.1.2 (2011-04-05)
+===========================
+
+* GPL and OSS policy adjustments:
+  - Removed GPL header from KreaTV.pm.
+  - Added meta tags in the Makefile and common.mk to prevent many makesystem
+    scripts and the proclifetime component to be included in the OSSK and
+    the bootloader-OSSK.
+
+
+Version 31.1.1 (2011-03-31)
+===========================
+
+* Toolchain 2.1.2 for st40.
+* Removed GCC_BASEDIR variable.
+
+
+Version 31.1.0 (2011-03-03)
+===========================
+
+* Add pydir target in idl compiling.
+* Add __init__.py target in pydir.
+* Add KATTENV_PATH.
+
+
+Version 31.0.1 (2011-03-01)
+===========================
+
+* Fix NO_STRIP.
+
+
+Version 31.0.0 (2011-02-15)
+===========================
+
+* Remove VIP20X2 and VIP26X2 targets.
+
+
+Version 30.0.1 (2011-02-15)
+===========================
+
+* Non-lossy encoding of component paths in names of result files in
+  $DAILY_LOG_DIR.
+* Fix installation of Java toolchain after removal of Java target in 29.0.0.
+* Download and install toolchains without breaking parallel builds.
+* Write build time info for each built component to
+  $DAILY_LOG_DIR/buildtime.txt (if $DAILY_LOG_DIR is set).
+* Marked getvar-% as a quick target to avoid failure when .makefile needs to be
+  made when running "$(make getvar-MAKESYSTEM)/binary_file upload ...".
+* Made "binary_file upload" correctly remove already added binary file.
+* Refer to the makesystem wiki page in README.
+* Remove RPC interface *Adapter.h files when cleaning.
+* Fix parallel IDL generation failure with make 3.82.
+
+
+Version 30.0.0 (2011-01-23)
+===========================
+
+* Remove --max-depth on build_requires and instead add more skip-dirs.
+* Don't include TARGET_NAME_TEST only 3PP license files in IIPS.
+* Don't include 3PP license files in IIPs for components listed
+  in OSS_IGNORE_COMPONENT in the makefile where they are REQUIREd.
+
+
+Version 29.1.1 (2011-01-19)
+===========================
+
+* Avoid failure in verbose mode when running unit tests that write to file
+  descriptor 4.
+* New st toolchain, version 2.1.1, with updated uclibc
+
+
+Version 29.1.0 (2011-01-17)
+===========================
+
+* Added TARGET_NAME_VIPHOST.
+
+
+Version 29.0.1 (2011-01-13)
+===========================
+
+* Use separate stamps for test execution with and without valgrind.
+* Show test output while running in verbose mode.
+* Abort test if heap corruption is detected.
+* Remove unused BSG_FW_VERSION variable.
+
+
+Version 29.0.0 (2010-12-28)
+===========================
+
+* Remove the separate Java target. This removes JAVA_TOOLCHAIN_NAME,
+  TARGET_NAME_JAVA, BUILD_JAVA and JAVA_INSTALL_DIR.
+* Add LINK_JAR macro.
+* Remove all XPCOM_* variables.
+* Remove BUILD_VIP1900 and BUILD_VIP2000 support.
+* Add TARGET_VERSIONS with the list of the active targets for the current
+  toolchain. Set to one of ST40_TARGET_VERSIONS or BCM74XX_TARGET_VERSIONS.
+* Add ENABLED_ST40_TARGETS and ENABLED_BCM74XX_TARGETS to list all st40/bcm74xx
+  targets that are enabled in platforms.mk.
+
+
+Version 28.0.2 (2010-12-10)
+===========================
+
+* Removed check for katt-server when running local_katt.
+* Simplified the install_katt rule.
+
+
+Version 28.0.1 (2010-12-07)
+===========================
+
+* Clear all environment variables that affect proxy settings for curl when
+  downloading/uploading binary files.
+
+
+Version 28.0.0 (2010-12-03)
+===========================
+
+* Added support for getting/storing binary files in a separate "binary files
+  repository".
+* Support for ".a" prerequisites when linking.
+* Improved detection of when to run dist_targets on various *_TARGETS.
+* Removed support for GNU make 3.80 and earlier.
+
+
+Version 27.0.2 (2010-11-25)
+===========================
+
+* Always create .dist file even if nothing was disted. This makes
+  install_component work properly when only some targets are enabled in
+  platforms.mk.
+* Fixed parallel build race in IDL generation rules.
+* Made dist_targets include toolchain/target/flavour in progress messages.
+
+
+Version 27.0.0 (2010-10-18)
+===========================
+
+* Implemented support for component caching.
+* New format of entries in the .dist files: dist_target records toolchain,
+  target and flavour of each disted file.
+* Added --include and --exclude flags to dist_targets.
+* Improved dist_targets help text.
+* Renamed $(quiet) to $(Q).
+* Added $(V) as an alias of $(VERBOSE).
+* Renamed install_components to install_parts.
+* Created new install_component script as a replacement of "make install".
+* "make install" is no longer supported.
+* The $(PREFIX) variable is no longer supported.
+* Dependency files created by the compiler are now collected and disted as
+  dist/deps/<component>.d.
+* Removed check for icec++ since it's no longer used.
+
+
+Version 26.0.1 (2010-09-27)
+===========================
+
+* Link with pthread for all toolchains
+* Toolchain 2.1.0 for st40
+
+
+Version 26.0.0 (2010-09-24)
+===========================
+
+* Strip pdr section from bcm binaries. Reduces the size of a typical
+  rootdisk with a few megabytes.
+* Use jscommon library to avoid rebuilding js helper classes.
+* Some minor IDL bugfixes.
+
+
+Version 25.1.2 (2010-09-21)
+===========================
+
+* Toolchain 2.0.5 for bcm74xx.
+
+
+Version 25.1.1 (2010-09-15)
+===========================
+
+* Added target specific include paths if needed.
+
+
+Version 25.1.0 (2010-08-30)
+===========================
+
+* Added script to find broken HTML links.
+* Distribute TOI Adapter files.
+
+
+Version 25.0.0 (2010-08-26)
+===========================
+
+* Made build_requires create the .require* files atomically.
+* Improved performance of strip_tree.sh (new name: strip_tree).
+
+
+Version 24.0.0 (2010-07-09)
+===========================
+
+* Introduced the USE_QUILT_GUARDS variable that can be set in the Makefile
+  when you want to use the alternative way of setting up the $(SRC_DIR)/patches
+  directory. When the variable is set, APPLY_PATCHES_IN_DIR expands to code that
+  essentially does this:
+
+  - creates $(SRC_DIR)/patches
+  - makes symlinks in $(SRC_DIR)/patches for each $(CURDIR)/patches/*.patch
+  - contructs the $(SRC_DIR)/patches/series file by running /usr/bin/guards
+    on $(CURDIR)/patches/series with guards called TOOLCHAIN_$(TOOLCHAIN),
+    TARGET_$(TARGET) and FLAVOUR_$(FLAVOUR).
+
+  /usr/bin/guards is included in the Quilt RPM. Manual:
+  http://manpages.ubuntu.com/manpages/dapper/man1/guards.1.html
+
+  This means that there will be a single series file that looks like this:
+
+  # Add include path to dist dir
+  api_build_Makefile.patch
+  cheapdebug_Makefile.patch
+  lib_livemedia_build.patch
+  ...
+  # Add functions declared but not defined in PI
+  +TARGET_vip20x2 missing_pi_functions.patch
+  ...
+
+  And so on. This way, the common parts will not be repeated and it's very
+  flexible to choose which patches should be applied for different
+  targets/flavours/toolchains.
+
+
+Version 23.0.0 (2010-07-08)
+===========================
+
+* Rewrote TOI IDL build system. Code is moved to idl.mk and idlrules.mk.
+  All TOI IDL related makefiles must be updated. JS plugins are built
+  in separate components.
+
+  The following variables must be set by makefiles:
+    TOI_IDL_DIR - directory with idls
+    TOI_IDLS - list of idls
+    TOI_COMPONENT - component name
+
+  Set if building CPP library:
+    TOI_OBJECT_NAMES - filename of ObjectNames include
+    TOI_EXPORT_PATH - directory name under dist/idl
+
+  Set if building JS plugin:
+    TOI_PLUGIN_MIME - JS plugin mime string
+    TOI_PLUGIN_VER - JS plugin version
+
+  Rules can use:
+    IDL_OBJS - list of object file that will be built
+    IDL_SRCS - list of source files
+
+* Setup rpath for test binaries so that they can run without needing to
+  setup LD_LIBRARY_PATH.
+
+
+Version 22.0.1 (2010-07-01)
+===========================
+
+* Link with pthread when doing gcov builds.
+* Enable gcov for 3PPs that have unit tests.
+* Corrected bad spelling of HOST_TOOLCHAIN_NAME in IDL mock generation rules.
+
+
+Version 22.0.0 (2010-05-27)
+===========================
+
+* Stop with error message if patches were applied with fuzz or long offsets.
+
+
+Version 21.0.4 (2010-05-20)
+===========================
+
+* Updated local_katt_tests target for new directory structure.
+
+
+Version 21.0.3 (2010-05-18)
+===========================
+
+* Added KATTENV_PRESERVE_SOURCE_DIR for KATTENV_TARGETS
+
+
+Version 21.0.2 (2010-05-14)
+===========================
+
+* Link with --no-add-needed (default on Fedora 13).
+
+
+Version 21.0.1 (2010-04-26)
+===========================
+
+* Included missing 20.1.2 content.
+
+
+Version 21.0.0 (2010-04-23)
+===========================
+
+* Toolchain 2.0.1 for st40.
+
+
+Version 20.1.2 (2010-04-22)
+===========================
+
+* Cleaned SPLIT_TARGETS stuff.
+* Made cleaning a bit more verbose.
+
+
+Version 20.1.1 (2010-04-14)
+===========================
+
+* Don't build VIP26X2 by default.
+
+
+Version 20.1.0 (2010-03-09)
+===========================
+
+* Dist distfiles.
+* Use PRE_BUILD and POST_BUILD to execute rules before or after a build.
+* Added support for running unit test in valgrind if USE_VALGRIND is set.
+* Added support for uncompressed tar files in UNPACK_SRC_ARCHIVE.
+* Fixed icecream problem related to absolute source code paths.
+
+
+Version 20.0.0 (2010-03-08)
+===========================
+
+* Renamed dist directory for KATT tests from dailykatt to kattregression.
+
+
+Version 19.0.1 (2010-03-03)
+===========================
+
+* Doxygen 1.6.3.
+
+
+Version 19.0.0 (2010-02-26)
+===========================
+
+* Added an error check making sure that unit test status is specified in each
+  makefile that contains SRCS. 3pp makefiles are excluded.
+* Added APPLY_PATCHES_IN_DIR macro.
+* Made trailing whitespace in definitions of CCACHE and ICECC more apparent.
+
+
+Version 18.0.0 (2010-02-19)
+===========================
+
+* Removed HW_DEP_*_TARGETS and merged into respective *_TARGETS.
+
+
+Version 17.0.0 (2010-02-11)
+===========================
+
+* Add USE_KLIBC flag for building lib and binaries against klibc.
+* Add $(TARGET)/lib and 3pp/$(TARGET)/lib to LIBPATH.
+* Enable JAVA builds, and make sure files are put in the correct Java target
+  dir.
+* Changed from toolchain 1.2.1 to 1.3.3 for st40.
+* Support build with HACK_TARGETS.
+* Support build with selected TARGET and build with it recursively, for
+  example, "TARGET=vip19x0 make" will build with all its dependences;
+  "TARGET=vip19x0 make local_all" will build local_all only. Supported TARGETs
+  are "test vip19x0 vip19x3 vip20x2 vip22x2 vip26x2 vip10x2" And note, when
+  assigning TARGET behind make, recursion won't work, only local_all is valid.
+* Renamed all CHIP to TOOLCHAIN in all Makefiles.
+* Removed setup from CHIP/TOOLCHAIN.
+* CHIP still can be used though. But will get a warning if used: "Deprecated
+  use of CHIP variable, please update your Makefile to use TOOLCHAIN variable
+  instead."
+* Unset PYTHONPATH to avoid trouble when explicitly set by user.
+* Compiler flag cleanup.
+* Fixed a bug where $(TOOLCHAIN)_TARGET_VERSIONS was not set correctly, which
+  made it build for more targets than intended when split_targets was set and
+  then only a subset of targets should be built.
+* Added support for breaking long lines in bootimage config with backslash.
+* Added __TARGET__ define for host.
+* Added objdump.
+* Changed -fno-pic to -fno-PIC since -fPIC is used to enable PIC.
+* Added support for disting C++ mocks using the INTERFACE_MOCKS variable.
+* Added support for generation of C++ mocks from IDL files.
+* Introduced Quilt to manage patches. $(PATCHES) should now contain relative
+  paths to directories with patches (typically just "patches"). A file named
+  "series" in each patch directory describes which patches to apply.
+* Changed support for running KATT tests on local STB from make system.
+* Added support for collecting KATT test cases from source code tree to be
+  executed after a successful build.
+* Made install rule work without previous setup.
+* Added support for single compilation unit.
+
+
+Version 16.0.0 (2009-09-02)
+===========================
+
+* Toolchain 2.0.2 for VIP2000.
+* Improved .dist files generation.
+* Added getvar-% target to get the value of any variable from the makesystem.
+* Use hard links in dist_targets script.
+* The KreaTV makesystem is updated to handle toolchain independent
+  targets. This involves the updates listed below.
+* Changed the meaning of a TARGET. Previously TARGET was tighly coupled to the
+  toolchain. Building a specific TARGET_NAME_VIPxxxx meant building a binary
+  for a chip family using a specific toolchain. Building a specific
+  TARGET_NAME_VIPxxxx now building for a specific VIP model. It has no interest
+  in what toolchain is used. If you however build a binary for a VIP22x2 and
+  have already built for a VIP20x2 it will not build the binary again. The new
+  level TOOLCHAIN is used. The default behaviour here when building in a directory
+  is now to let object files end up in a toolchain specific directory
+  rather than a target specific directory.
+* Added SPLIT_TARGETS flag. Use it in order to separate the builds of binaries
+  for all targets using the same toolchain. This will make built files end
+  up in target specific directories.
+* Depracated targets names:
+   TARGET_NAME_VIP1200, TARGET_NAME_VIP1500, TARGET_NAME_VIP1900,
+   TARGET_NAME_VIP1903, TARGET_NAME_VIP2000
+* New target names:
+   TARGET_NAME_VIP10X2, TARGET_NAME_VIP19X0, TARGET_NAME_VIP19X3,
+   TARGET_NAME_VIP20X2, TARGET_NAME_VIP22X2, TARGET_NAME_VIP26X2
+* Added target specific flavours. You can choose to define these variables if
+  you want to build several binaries for a specific target:
+    VIP10X3_FLAVOURS, VIP19X0_FLAVOURS, VIP19X3_FLAVOURS,
+    VIP20X2_FLAVOURS, VIP22X2_FLAVOURS, VIP26X2_FLAVOURS
+  Also removed old syntax "FLAVOURS-$(TARGET_NAME_VIPxxxx)" (which never
+  reached trunk).
+* Backwards compatibility:
+  This:
+    COMPONENT_TARGETS += TARGET_NAME_VIP1900
+  has the same effect as this:
+    COMPONENT_TARGETS += TARGET_NAME_VIP19X0
+    COMPONENT_TARGETS += TARGET_NAME_VIP19X3
+  This:
+    COMPONENT_TARGETS += TARGET_NAME_VIP2000
+  has the same effect as this:
+    COMPONENT_TARGETS += TARGET_NAME_VIP10X2
+    COMPONENT_TARGETS += TARGET_NAME_VIP20X2
+    COMPONENT_TARGETS += TARGET_NAME_VIP22X2
+    COMPONENT_TARGETS += TARGET_NAME_VIP26X2
+* Removed these variables from platforms.mk.template:
+    BUILD_VIP1200, BUILD_VIP1500, BUILD_VIP1900, BUILD_VIP1903
+* Added these variables into platforms.mk.template:
+    BUILD_VIP10X2, BUILD_VIP19X0, BUILD_VIP19X3, BUILD_VIP20X2,
+    BUILD_VIP22X2, BUILD_VIP26X2
+
+
+Version 15.0.4 (2009-07-14)
+===========================
+
+* Write build data to a temp file and do an atomic rename to the real file.
+
+
+Version 15.0.3 (2009-06-30)
+===========================
+
+* Add dummy rules to .libdepends files in the same way as gcc -MP.
+* Fixed .dist files not including headers.
+* Fixed issue with variables starting with a digit.
+
+
+Version 15.0.2 (2009-05-29)
+===========================
+
+* Modified build_requires to support extended config syntax.
+
+
+Version 15.0.1 (2009-05-07)
+===========================
+
+* Fixed proxy issue with wget.
+* Don't dist .svn directories.
+
+
+Version 15.0.0 (2009-05-04)
+===========================
+
+* Added version numbering info and changed svn -> svn.ea.mot.com in CHANGES
+  file.
+* Made hack targets aware of target specific flavours and added support for
+  target specific hack flavour using HACK_FLAVOUR-$(TARGET_NAME_VIPxxxx)
+  syntax.
+* Sanity check TARGET variable.
+* Moved constants from targetsetup.mk to constants.mk and made build fail if
+  targetsetup.mk is included directly; constants.mk should be used instead.
+* Fixed parallel build to not disable the parallel run for all components if
+  the build is started in a component with NO_PARALLEL set.
+* Added KreaTV::replace_in_file function.
+* Do not try to remove files not in CURDIR.
+* Improved .dist files generation.
+* Modified setup target to only be run if needed.
+
+
+Version 14.2.2 (2009-04-06)
+===========================
+
+* Added -m4-300 flag for building modules for VIP1903 target.
+* Removed support for VIP800.
+
+
+Version 14.3.0 (2009-03-10)
+===========================
+
+* Added support for VIP800.
+
+
+Version 14.2.1 (2009-03-02)
+===========================
+
+* HTML meta filter fix.
+
+
+Version 14.2.0 (2009-02-19)
+===========================
+
+* Removed special meaning of 3pp_local_clean and 3pp_tree_clean rules.
+* Added NO_STRIP variable that prevents target code stripping.
+* apply_patches is not disted but instead called directly from makesystem
+  directory.
+* Set makeflag -s to avoid redundant messages, if not using VERBOSE flag or
+  building 3pps. Also an echo is removed from tree.mk to get cleaner output.
+* Rewrote dist_targets to have more sane arguments and handle directory
+  trees. All disted files are listed in .dist.
+  New usage: $(MAKESYSTEM)/dist_targets SOURCE... DISTDIR
+               [--preserve-source-dir=true/false]
+* Use the .dist file to implement a dist_clean rule that can remove all disted
+  files from a component provided that the component is using dist_targets to
+  install its files. The dist_clean rule is called when a Makefile is updated.
+* Fixed broken dependencies when using very long filenames.
+* Added target specific flavours using FLAVOURS-$(TARGET_NAME_VIPxxxx) syntax.
+
+
+Version 14.1.0 (2009-02-07)
+===========================
+
+* Added support for VIP1903.
+
+
+Version 14.0.2 (2009-01-20)
+===========================
+
+* Strip host (Intel) code.
+* Merged 13.0.2.
+
+
+Version 14.0.1 (2008-12-15)
+===========================
+
+* Added eclipse support.
+* Toolchain 1.2.1 for 1900.
+* Fine tuned inlining optimization for 1900.
+
+
+Version 14.0.0 (2008-11-06)
+===========================
+
+* Install products built as a setup target in the setup stage.
+* Added kreatv-shell, a convenience macro for checking $(shell ...) result.
+* Removed unused DEPEND/LOADER/LD_PATH/RUN/VIP_TARGET variables.
+* Use CFLAGS when linking C code and CXXFLAGS when linking C++ code.
+* Added KreaTV::backticks, a "backticks" function with error checking.
+* Removed support for vip500.
+
+
+Version 13.0.2 (2009-01-15)
+===========================
+
+* Updated doxygen to v 1.5.4. This fixes template errors.
+
+
+Version 13.0.1 (2008-10-27)
+===========================
+
+* Added -fno-move-loop-invariants to vip1900 compiler optimization flags to
+  work around compiler bug in gcc 4.2.1.
+
+
+Version 13.0.0 (2008-10-24)
+===========================
+
+* HACK_TARGETS works as expected.
+* CHK_SOURCES uses first flavour or CHK_FLAVOUR if set.
+* Build 3pp targets and flavours in parallel.
+* If PARALLEL_3PP is set 3pps will be build in parallel.
+* Made 'makesystem' a prerequisite even for components without REQUIRES.
+* Removed module test support.
+* Renamed BUILD_AUTO_TESTS to BUILD_TESTS in platforms.mk.
+* Removed AUTO_TESTS and MANUAL_TESTS variables.
+* Added TEST_TARGETS and TARGET_NAME_TEST variables to enable tests on host.
+* Renamed AUTO_TEST_ENV to TEST_TARGET_ENV.
+* Removed runtornado script.
+* Gcov improvements.
+
+
+Version 12.0.2 (2008-10-02)
+===========================
+
+* Fixed bug introduced in 12.0.1 related to .config.template naming.
+
+
+Version 12.0.1 (2008-09-29)
+===========================
+
+* Renamed ".platforms.mk.template" to "platforms.mk.template".
+
+
+Version 12.0.0 (2008-09-25)
+===========================
+
+* Include linux/autoconf.h when building kernel modules on all architectures.
+* Added $(TARGET_3PP_DIST_DIR)/linux/include to include path when building
+  kernel modules.
+* Added -w flag to modpost on 1900 to get warnings instead of errors with
+  kernel 2.6.23.
+
+
+Version 11.0.0 (2008-09-08)
+===========================
+
+* Improved ordering of build parts to handle parallel building. In particular,
+  header disting is done in setup stage and libraries are built before
+  binaries. Also include local build directory in library path to avoid having
+  to dist libraries.
+* Toolchain 1.0.4 for 1200.
+* Toolchain 1.0.5 for 1500.
+* Toolchain 1.2.0 for 1900.
+* Strip setuid binaries.
+* Support for running tests on 64-bit host machines now also on Ubuntu.
+* Check the 3PPLICENSE file for all third-party components.
+* Automatically include 3PPLICENSE for used third-party components in IIPs.
+* Handle zip archives in UNPACK_SRC_ARCHIVE.
+
+
+Version 10.0.1 (2008-07-30)
+===========================
+
+* Toolchain installation bug fix.
+
+
+Version 10.0.0 (2008-07-18)
+===========================
+
+* Support for running tests on 64-bit host machines.
+* Replaced *_OMIT_SOURCE_DIR=yes with *_PRESERVE_SOURCE_DIR=true, with inverted
+  behaviour.
+* Made gcov builds (USE_GCOV=true) work again.
+* Reenabled test output needed for the build system.
+* Merged buildinfo.mk into targetsetup.mk.
+* Made toolchain installation atomic, to avoid problems with incomplete
+  toolchain installations.
+* Added "KreaTV.pm" Perl module with helper functions for error checking.
+
+
+Version 9.0.0 (2008-05-09)
+==========================
+
+* Better handling of undefined symbols with -z defs (replaces the link tesk).
+* Set GCC_BASEDIR in BSG_DEVSETUP to make it effective for foreign makes.
+* Toolchain 1.0.3 for 1200.
+* Toolchain 1.0.4 for 1500.
+* Changed ccache umask from 002 to 000.
+* Made libc print debugging messages to stderr instead of /dev/tty.
+* Fixed problem where strip_tree.sh did not always succeed.
+* Removed BUILD_HOST from platforms.mk. The host target is now always built.
+* Added MODULE_NAME. Must be set when building a kernel module.
+* Generate mod.c automatically when building a kernel module for Linux 2.6.
+* Removed DIST_TARGETS (and "dist_targets 3 ..."), RPC_HEADERS,
+  RPC_EXPORT_INTERFACE, XPCOM_EXPORT_PATH and XPCOM_INTERFACE_PATH.
+* Removed support for TARGET_NAME_LINK.
+* Added TARGET_NAME_VIP_NOARCH, which only is enabled if at least one other
+  VIP target is enabled.
+* Added HOST_LDFLAGS to link host programs with --hash-style=sysv if ld
+  supports it. HOST_LDFLAGS is added to LDFLAGS when building for host.
+* Removed support for TARGETCONFIG_TARGETS. Use CONFIG_TARGETS instead.
+* No errors when counting files in /tmp before and after test.
+* Merged the two toolchain installation procedures (standalone and from
+  common.mk) into one. Toolchains are now installed with mode 777.
+
+
+Version 8.3.1 (2008-04-10)
+==========================
+
+* Made proclifetime kill all children when a process takes too long time to
+  run.
+* Toolchain 1.1.0 for java.
+
+
+Version 8.3.0 (2008-04-02)
+==========================
+
+* Added link test for DSOs.
+* Better error message when REQUIRES is incorrect.
+* Ignore leading and trailing whitespace, and Unix and DOS line endings when
+  parsing boot image config file.
+
+
+Version 8.2.4 (2008-03-26)
+==========================
+
+* Toolchain installation no longer requires kreatel group.
+
+
+Version 8.2.3 (2008-03-13)
+==========================
+
+* Removed reading of unused branchconfig file.
+* Removed makefile templates.
+* Do not try to generate icecc-env before toolchain is installed.
+* FIXDEPENDS checks that the files still exist before depending on them.
+* Fixed problem where autotests were built even if false in platforms.mk.
+
+
+Version 8.2.2 (2008-03-06)
+==========================
+
+* Do not log output from testcases when not failing (or in verbose mode).
+* Set GCC_BASEDIR to BSG_SRC_ABS to strip it from filename paths before
+  expanding the macro __FILE__.
+* Only compile test code for 500 and host.
+* Toolchain 1.0.2 for 1200.
+* Toolchain 1.0.3 for 1500.
+* Toolchain 1.1.2 for 1900.
+
+
+Version 8.2.1 (2008-02-19)
+==========================
+
+* Changed --strip-unneeded to --strip-debug for 1200.
+
+
+Version 8.2.0 (2008-02-14)
+==========================
+
+* Renamed BOOT_IMAGE_CONFIG_FILENAME to BOOT_IMAGE_CONFIG.
+* Added --no-proxy to wget.
+* Added --max-depth and --skip-dir to build_requires in order to minimize
+  filesystem traversal when searching for IIPs.
+* Fixed problem where build_requires did not read boot image config.
+* Sort the contents of dependency files to make them easier to read.
+* Toolchain 1.1.0 for 1900.
+* Removed special meaning of "true" in makefile variables.
+* Strip relocatables harder.
+
+
+Version 8.1.0 (2007-11-22)
+==========================
+
+* Handle RPMs in UNPACK_SRC_ARCHIVE.
+* Toolchain 1.0.1 for 1200.
+* Toolchain 1.0.2 for 1500.
+* Doxygen 1.5.0.
+* Added existence checks for php and doxygen before running.
+
+
+Version 8.0.0 (2007-10-17)
+==========================
+
+* Fixed problem with VERBOSE and LINK-style commands.
+* Library dependencies are now only on archives, with the exception of
+  autotests.
+* Don't run install scripts when there is nothing to install.
+* Require ccache-motorola if not run with NO_CCACHE=true.
+* Fixed problem introduced in 7.0.0 with GNU make earlier than 3.80.
+* Removed special handling of components with the word "mozilla" in their path.
+* Removed CC_VERSION, COMPONENT_NOT_3PP, CP_DEREF, NO_DISTCC and LDD variables.
+* Added .SUFFIXES: which clears the list of default suffix rules.
+* NO_ICECC=true does not imply NO_PARALLEL=true.
+* Added NO_PARALLEL=true and MAKEFLAGS += -j1 to 3pp makefiles.
+* Updated generation of .requires files, and replaced FORCE with .PHONY:.
+
+
+Version 7.0.0 (2007-10-04)
+==========================
+
+* New toolchain structure.
+* IPSTB -> VIP.
+* Split up target variables (TARGET_NAME_VIP* (or TARGET) has "vip*" values and
+  ARCH_VIP* (or TARGET_ARCH) has "*-motorola-linux-gnu" values).
+* Stricter perl scripts.
+* New logic for evaluating BSG_SRC and BSG_SRC_ABS variables.
+* New MAKESYSTEM variable.
+* Removed explicit default architecture flags.
+* New way of controlling what platforms to build (targets.mk -> platforms.mk)
+* Removed PC_LINUX, PC_WINDOWS and SOLSPARC targets.
+* Added OBJCOPY variable.
+* Added "make help", which displays a help text.
+* Added makefile variable IIP_DEPENDS, which adds dependencies to other IIPs.
+* Added makefile variable IIP_NAME, which locates IIPs.
+* Added makefile variable BOOT_IMAGE_CONFIG_FILENAME, which identifies a config
+  file with additional IIP dependencies.
+
+
+Version 6.2.3 (2007-08-31)
+==========================
+
+* Refined icecc-envs directory handling.
+* Changed Kreatel.SecurityClass to KreaTV.SecurityClass.
+
+
+Version 6.2.2 (2007-06-14)
+==========================
+
+* Support more than one PATCHES file.
+* Updated to devenv 22.0.1.
+* Added HACK_TARGETS to be used to build some targets with a specific
+  HACK_FLAVOUR (defaults to first word in FLAVOURS).
+
+
+Version 6.2.1 (2007-05-31)
+==========================
+
+* Do install for all FLAVOURS.
+
+
+Version 6.2 (2007-05-09)
+========================
+
+* Updated to devenv 22.0.
+* Added more common build flags for VIP1200.
+* Added check-syntax rule for use by Eclipse, Emacs flymake or similar.
+* Rebuild 3pp if makefile is changed.
+* Always hide move of dependency file.
+* Always dist products to same dir.
+
+
+Version 6.1 (2007-02-27)
+========================
+
+* Added FLAVOURS system. This is a list that will be iterated over like the
+  targets but will set FLAVOUR to each item in the list. Can be used to build
+  the same code several times with the same compiler but with different
+  defines, compiler flags etc.
+* Added SETUP_TARGETS, this is a special target that will be built before the
+  normal targets, this is needed to be able do no-arch work that needs to be
+  done before the real build starts. Examples are unpacking tar-balls and doing
+  IDL compilation. IDL targets are automatically added to this target.
+* Added Klocwork static code reviews with "make REVIEW=1".
+* Simplified target handling a lot, no need for special targets for each
+  architecture.
+* VERBOSE prints linker commands.
+* Include branchconfig which may override enabled targets and DEVENV_VERSION.
+* Added NO_PARALLEL to disable parallel building in a component.
+* Cleaned up VIP1200 code.
+* Fixed problems with dependencies when the same filename is used in two levels
+  of directories and when not using a target-directory.
+
+
+Version 6.0 (2007-01-29)
+========================
+
+* Added new target mipsel-vip1200-linux-gnu for the VIP1200 series.
+* Updated to devenv 21.0.
+
+
+Version 5.4 (2007-01-16)
+========================
+
+* Shut idl compiler up.
+* Make /extra/icecc-envs world writable.
+* Check that ccache binary exists before using it.
+* Updated apply_patches script to generate patch dependencies (PATCHES_DEP).
+* Added convenience variables to unpack tarballs (UNPACK_SRC_ARCHIVE) and apply
+  patches (APPLY_PATCHES).
+* Fixed FIXDEPEND to work without ccache. It seems there is a bug in ccache
+  that generates faulty dependency files and it is this bug that FIXDEPEND
+  works-around. When not using ccache the dependency file should be left
+  untouched.
+* When aborting a build dependency files were generated but not fixed. This
+  could, in the worst case, lead to broken binaries.
+* Added support for test coverage analysis with gcov. With the environment
+  variable USE_GCOV set to true all BIN_- and LIB_TARGET's are now tested with
+  gcov. Set kbs:gcov on the branch root to enable gcov builds on svn.ea.mot.com (no
+  specific value is needed, it just needs to exist).
+
+
+Version 5.3 (2006-11-29)
+========================
+
+* Updated to devenv 20.4.
+* Don't use icecream for host builds.
+* Put icecc-envs in /extra/icecc-envs and make sure this directory exists.
+
+
+Version 5.2.2 (2006-11-22)
+==========================
+
+* Improved optimization.
+
+
+Version 5.2.1 (2006-11-21)
+==========================
+
+* Minor icecream fixing.
+* Fixed apply_patches to work with RH9 perl.
+
+
+Version 5.2 (2006-11-10)
+========================
+
+* Updated to devenv 20.3.
+
+
+Version 5.1 (2006-11-06)
+========================
+
+* Use icecream instead of distcc. Besides setting up compilers and such an
+  icecream devenv is generated which contains gcc and g++ for a specific
+  architecture. A wrapper script is needed to handle CROSS_PREFIX style
+  compilation.
+* Generate source dependencies on each file instead of whole directory.
+* Added apply_patches script.
+* Try to download new devenv if needed.
+* Default to nonverbose, define VERBOSE to get the old behavior.
+* Removed some COMPONENT_TARGET junk.
+
+
+Version 5.0.4 (2006-10-23)
+==========================
+
+* Updated to devenv 20.2.
+
+
+Version 5.0.3 (2006-10-18)
+==========================
+
+* Updated to devenv 20.1, solves bug 6089.
+* Removed rdynamic from LINK_SO, solves bug 5738.
+
+
+Version 5.0.2 (2006-09-27)
+==========================
+
+* Don't use -Os on sh4 due to bug 5838.
+
+
+Version 5.0.1 (2006-08-28)
+==========================
+
+* New value on dbl and bootimage compatibility for VIP1900.
+
+
+Version 5.0 (2006-06-30)
+========================
+
+* Added sh4 support for IP-STB 1900.
+* Added variables to control xpcom install dirs.
+
+
+Version 4.2.2 (2006-06-15)
+==========================
+
+* Make sure correct gcc libs are used with runtornado.
+* Remove ccache links setup by RedHat packages.
+* CC_VERSION is now set to the correct value.
+* The three items above means that bug 5620 is now fixed.
+
+
+Version 4.2.1 (2006-03-16)
+==========================
+
+* Fix bug: When running make in a TARGET_NAME_NOARCH component no "make
+  local_all" was made.
+
+
+Version 4.2 (2006-02-22)
+========================
+
+* Allow RPC IDL files to be in a sub directory of the Makefile. Generated files
+  will end up in the sub dir also.
+
+
+Version 4.1.1 (2006-02-21)
+==========================
+
+* Updated to devenv 19.1.1.
+
+
+Version 4.1 (2006-01-12)
+========================
+
+* Changes to work with devenv 19.1.
+* Added proclifetime (fixes bug 4892).
+* Added implicit require to makesystem.
+
+
+Version 4.0 (2005-12-19)
+========================
+
+* Use omnipython instead of python if possible.
+* Changes to work with devenv_19.0.
+* Add --skip parameter to html_meta_filter (hence also to
+  html_security_filter).
+* Doxygen 1.4.5.
+* install_devenv updated to not install fakeroot (which has been removed).
+
+
+Version 3.0 (2005-11-18)
+========================
+
+* Remove devenv and fakeroot tgz from makesystem. Has to be installed
+  separately.
+
+
+Version 2.5.2 (2005-11-03)
+==========================
+
+* Simpler and easier to use install_devenv script. It also prints more help and
+  does additional error checking.
+* Only apply -fPIC to libraries (saves memory on i586). Fixes bug 5025.
+* Use -Os on all architectures.
+* Remove support for old libstdc++ versions since we can't use them anyway with
+  the current devenv.
+
+
+Version 2.5.1 (2005-10-27)
+==========================
+
+* Rebuild the .requires* files when a component is deleted, without screaming
+  about missing Makefile(s).
+
+
+Version 2.5 (2005-10-20)
+========================
+
+* Add ifeq, ifneq and endif commands to install_components.
+
+
+Version 2.4.2 (2005-09-16)
+==========================
+
+* Use -Os optimization for 3pps on i586-kreatel-linux-gnu. Continue to use -O2
+  optimization on mipsel-kreatel-linux-gnu since -Os does not seem to work
+  there. -Os saves ~ 0.5 MB on an x86.
+
+
+Version 2.4.1 (2005-09-01)
+==========================
+
+* Fixed bug which caused ccache to fail for TARGET host on some modules.
+* install_devenv fails if devenv path is not absolute.
+
+
+Version 2.4 (2005-08-15)
+========================
+
+* Fix bug 4842 (install_components: Does not report errors back to calling
+  applications).
+* Add C++ variables to BSG_DEVSETUP.
+* Fix bug (install_components: Does not generate dependencies to links).
+
+
+Version 2.3 (2005-07-29)
+========================
+
+* Update devenv to 18.1 (with glibc 2.3.3 and gcc with xgot).
+
+
+Version 2.2 (2005-06-16)
+========================
+
+* Disable distcc for host builds, since we might have different compilers on
+  different build machines.
+* Remove graphviz from makesystem since it gives build errors on some
+  machines. Requires that dot is installed on the build machine instead.
+
+
+Version 2.1 (2005-05-30)
+========================
+
+* Add graphviz which includes dot, that is needed by doxygen.
+
+
+Version 2.0.1 (2005-05-26)
+==========================
+
+* Get the branch name from the makesystem parent dir, which will be the branch
+  name of the project using makesystem. Previously we got the branch name of
+  makesystem which is not correct.
+
+
+Version 2.0 (2005-05-24)
+========================
+
+* Updated to makesystem as it looks on bsg/branches/SALSTERN@29029.
+* devenv_18.
+* A real TARGET_NAME_PC_LINUX.
+* Don't require distcc to be installed.
+
+
+Version 1.1.2 (2005-06-16)
+==========================
+
+* Disable distcc if not installed.
+
+
+Version 1.1.1 (2005-05-26)
+==========================
+
+* Backported from 2.0.1: Get the branch name from the makesystem parent dir,
+  which will be the branch name of the project using makesystem. Previously we
+  got the branch name of makesystem which is not correct.
+
+
+Version 1.1 (2005-05-23)
+========================
+
+* Put doxygen in makesystem, since makesystem requires it.
+
+
+Version 1.0 (2005-05-20)
+========================
+
+* Imported makesystem as it is in bsg/branches/GLYPEN rev 28963.
+
+
+==============================================================================
+
+
+Release numbering, compatibility, and deprecation
+=================================================
+
+makesystem uses "MAJOR.MINOR.PATCH" release numbers. The general idea is:
+
+   1) Upgrading/downgrading between different patch releases in the
+      same MAJOR.MINOR line never breaks Makefiles. It may cause bugfixes
+      to disappear/reappear, but make targets and semantics remain
+      the same. (Of course, the semantics may change in the trivial
+      ways appropriate for bugfixes, just not in ways that would force
+      adjustments in calling Makefiles.)
+
+   2) Upgrading to a new minor release in the same major line may
+      cause new make targets or tools to appear, but not remove any.
+      Any Makefile written to the old minor number will work with any
+      later minor number in that line. However, downgrading afterwards
+      may not work, if new code has been written that takes advantage
+      of the new Makefile.
+
+   3) When the major number changes, all bets are off. This is the
+      only opportunity for a full reset of make targets, and while we
+      try not to gratuitously remove targets, we will use it to clean
+      house a bit.

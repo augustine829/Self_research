@@ -1,0 +1,179 @@
+#!/usr/bin/env python2
+
+import argparse
+import os
+import stat
+import sys
+
+from os.path import basename
+
+
+USED_ENVIRONMENT_VARIABLES = ['BOOT_IMAGE_NAME',
+                              'BSG_BUILD_BRANCH',
+                              'BSG_BUILD_VERSION',
+                              'DEVICE',
+                              'TOOLCHAIN']
+
+
+def fail(message):
+    print >> sys.stderr, '%s: error: %s' % (basename(__file__), message)
+    sys.exit(1)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            'Generate a makesystem-independent, executable shell script that '
+            'builds boot image related products. The program depends on the '
+            'following environment variables (see makesystem for semantics): '
+            '%s. All path options should be relative paths unless explicitly '
+            'noted.' % ', '.join(USED_ENVIRONMENT_VARIABLES)))
+    parser.add_argument('--config',
+                        required=True,
+                        help='boot image configuration path')
+    parser.add_argument('--toolchain-path',
+                        required=True,
+                        help='absolute path to toolchain')
+    parser.add_argument('--boot-image',
+                        help='boot image path')
+    parser.add_argument('--debug-boot-image',
+                        help='debug boot image path')
+    parser.add_argument('--rootdisk',
+                        help='rootdisk archive path')
+    parser.add_argument('--nfs-kernel',
+                        help='NFS kernel path')
+    parser.add_argument('--debug-symbols',
+                        help='debug symbols archive path (component-relative)')
+    parser.add_argument('--lib-dependency-info',
+                        help=('path to a file where rootdisk library '
+                              'dependency information will be written'))
+    parser.add_argument('--additional-build-arguments',
+                        help=('additional arguments that should be passed '
+                              'along transparently to build_boot_image'))
+
+    parser.add_argument('build_script',
+                        metavar='BUILD_SCRIPT',
+                        help='Path of generated build script.')
+
+    # Parse arguments before environment variables in case '--help' was passed
+    args = parser.parse_args()
+
+    # Verify that environment variables are present and non-empty
+    missing_or_empty = []
+    for var in USED_ENVIRONMENT_VARIABLES:
+        if var not in os.environ or os.environ[var].strip() == '':
+            missing_or_empty.append(var)
+    if missing_or_empty != []:
+        fail('these environment variables were empty (or not set): %s.' %
+             ', '.join(missing_or_empty))
+
+    if os.environ.get('TOOLCHAIN') == 'host':
+        fail("boot image building for host toolchain is not supported")
+
+    return args
+
+
+def get_build_boot_image_args(program_args):
+    bbi_args = []
+
+    bbi_args.append('--source $iips_dir')
+    bbi_args.append('--toolchain_path %s' % program_args.toolchain_path)
+
+    if program_args.boot_image is not None:
+        bbi_args.append('--boot_image ' + program_args.boot_image)
+    if program_args.debug_boot_image is not None:
+        bbi_args.append('--debug_boot_image ' + program_args.debug_boot_image)
+    if program_args.rootdisk is not None:
+        bbi_args.append('--rootdisk ' + program_args.rootdisk)
+    if program_args.debug_symbols is not None:
+        bbi_args.append('--debug_symbols ' + program_args.debug_symbols)
+    if program_args.nfs_kernel:
+        bbi_args.append('--kernel ' + program_args.nfs_kernel)
+
+    bbi_args.append('--config %s' % program_args.config)
+    bbi_args.append('--toolchain $TOOLCHAIN')
+    bbi_args.append('--device $DEVICE')
+    bbi_args.append('--info version $BSG_BUILD_VERSION')
+    bbi_args.append('--info branch $BSG_BUILD_BRANCH')
+    bbi_args.append('--info company "ARRIS Enterprises, Inc."')
+    bbi_args.append('--info configuration $BOOT_IMAGE_NAME')
+
+    if program_args.additional_build_arguments is not None:
+        bbi_args.append(program_args.additional_build_arguments)
+
+    return bbi_args
+
+
+def get_lib_dependency_build_script_part(program_args):
+    if program_args.lib_dependency_info is None:
+        return ""
+    if program_args.rootdisk is None:
+        return ""
+
+    contents = r"""
+if [ -f %(rootdisk)s ]; then
+    rootdisk_extraction=$(mktemp -d rootdisk.XXXXXX)
+    tar -xf %(rootdisk)s -C $rootdisk_extraction --exclude rootdisk/dev
+    $tools_dir/lib_dependency_info --path $rootdisk_extraction > %(info_path)s
+    rm -rf $rootdisk_extraction
+fi
+""" % {'rootdisk': program_args.rootdisk,
+       'info_path': program_args.lib_dependency_info}
+
+    return contents
+
+
+def get_build_script_contents(build_boot_image_args, lib_dependency_part):
+    contents = r"""
+#!/bin/bash
+
+set -e
+set -u
+
+help="Usage: $0 TOOLS_DIR BSG_BRANCH_ROOT IIPS_DIR";
+
+args_expected=3
+args_actual=$#
+if [ $args_actual -lt $args_expected ]; then
+    echo "$0: error: expected at least $args_expected arguments but got $args_actual"
+    echo "$help"
+    exit 1
+fi
+
+tools_dir=$(readlink -ev $1)
+bsg_branch_root=$(readlink -ev $2)
+iips_dir=$(readlink -ev $3)
+
+BSG_SRC_ABS=$bsg_branch_root \
+BOOT_IMAGE_DIR=$bsg_branch_root/products/ip-stb/boot_image \
+PERL5LIB=$tools_dir \
+  $tools_dir/build_boot_image \
+    {bbi_args} \
+    2>&1 | $tools_dir/colorize_build_output
+{post_processing}"""
+
+    substitutions = {
+        'bbi_args': ' \\\n    '.join(build_boot_image_args),
+        'post_processing': lib_dependency_part}
+    contents = contents.format(**substitutions)
+
+    # Substitute environment variables
+    for var in USED_ENVIRONMENT_VARIABLES:
+        contents = contents.replace('$%s' % var, os.environ[var])
+
+    return contents.strip()
+
+
+def main():
+    program_args = parse_args()
+    build_boot_image_args = get_build_boot_image_args(program_args)
+    lib_dep_part = get_lib_dependency_build_script_part(program_args)
+    build_script = get_build_script_contents(build_boot_image_args,
+                                             lib_dep_part)
+
+    open(program_args.build_script, 'w').write(build_script.strip())
+    current_permissions = os.stat(program_args.build_script).st_mode
+    os.chmod(program_args.build_script,
+             current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+main()

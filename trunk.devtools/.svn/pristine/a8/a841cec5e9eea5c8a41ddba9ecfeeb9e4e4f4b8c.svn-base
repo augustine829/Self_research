@@ -1,0 +1,229 @@
+#!/bin/bash
+# 110812 Created by Mikael Liljeroth & Andreas Wettergren
+#
+# Use makejen instead.
+
+if [ ! -x /usr/bin/inotifywait ]
+then
+    echo -e "Error:\nYou need 'inotifywait' in order to use this script"
+    echo "Install the needed package with 'sudo yum install inotify-tools'"
+    exit 1
+fi
+
+forceexit="false"
+
+cleanup()
+{
+    kill -s TERM "$makePID" &> /dev/null
+    while kill -0 "$makePID" &> /dev/null
+    do
+	echo "Waiting for make to die"
+	sleep 1
+    done
+
+    # Wait for child processes to $makePID
+    echo -n "Waiting for submake processes to finish..   "
+    safecount=5
+    while pgrep -g $$ "make$" &>/dev/null
+    do
+	#pgrep -l -g $$ -v "makej-modded"
+	echo -ne "\b\b$safecount "
+	sleep 1
+	safecount=$(($safecount - 1))
+	if [ $safecount -eq 0 ]; then
+	    echo -e "\b\b0\nBoom shakalack - Killing all make processes"
+	    pkill -9 -g $$ "make$"
+	    break
+	fi
+    done
+    echo ""
+
+    kill -s TERM "$inotifywaitPID" &> /dev/null
+    rm -f "$inotifyPipe"
+    echo "Cleaned up temp files"
+    exit 255
+}
+
+checkTotalComponents()
+{
+    reqmakePID=$(pgrep -n -P $makePID -f 'make -f .requires')
+    echo "REQ PID=$reqmakePID"
+}
+
+commonmkline=$(grep -E '^include.*/common.mk' Makefile 2>/dev/null)
+if [ "$?" -ne "0" ]
+then
+    echo "There is no common.mk in Makefile, aborting"
+    exit 255
+fi
+
+rootdir=$(echo "$commonmkline" | perl -ne '/include[ ]+(.*?)makesystem/ and print "$1"')
+if [ -z $rootdir ]; then
+    rootdir="."
+fi
+
+rootdir="$(cd $rootdir && pwd)"
+distdir="$rootdir/dist"
+
+if [ ! -w $distdir ]; then
+    echo "Creating $distdir"
+    mkdir -p $distdir
+fi
+
+if ! test -w $distdir || test -z $distdir
+then
+    echo "Could not find directory to write logs to, aborting"
+    exit 255
+fi
+
+# Init variables
+arguments="$@"
+uniqueName=$(exec uuidgen)
+mkdir -p "/tmp/$USER"
+
+DAILY_LOG_DIR="$distdir/../.build/makejlogs"
+if [ -d $DAILY_LOG_DIR ]; then
+    echo "Removing old logs"
+    rm -rf $DAILY_LOG_DIR
+fi
+
+mkdir -p $DAILY_LOG_DIR
+buildErrors=""
+inotifywaitPID=""
+inotifyPipe="/tmp/$USER/inotify$uniqueName"
+mkfifo $inotifyPipe
+makeresultfile="MakeReturnCode"
+
+# Get number of cores on host
+cores=$(grep -c processor /proc/cpuinfo)
+
+echo "Make will execute $cores parallel jobs if not explicitly overridden by -j"
+echo -e "Normal makesystem output is suppressed but errors will be displayed\n"
+
+DAILY_LOG_DIR="$DAILY_LOG_DIR" make  -j$cores $arguments | grep -v -E '=== Building|=== Finished' && \
+    echo "0" >> "$DAILY_LOG_DIR/$makeresultfile" || \
+    echo "2" >> "$DAILY_LOG_DIR/$makeresultfile" &
+pidOfMakeShell=$!
+makePID=$(pgrep -P $pidOfMakeShell make)
+
+makePwd=$(pwdx $makePID | cut -d' ' -f2)
+#echo "MAKE is running inside $makePwd"
+
+if [[ $arguments =~ '.*local_all.*' ]]
+then
+    totalComponents="1"
+else
+    totalComponents=$(grep 'TREEDIRS' $makePwd/.requires | cut -d'=' -f2 | wc -w)
+    totalComponents=$(($totalComponents + 1))
+fi
+
+#echo "Total number of components: $totalComponents"
+
+padding=$(expr length $totalComponents)
+padding=$(($padding * 2))
+padding=$(($padding + 1))
+
+#echo "The required padding is $padding"
+
+startTime=${SECONDS}
+
+# Filter out the important things
+buildCounter=0
+
+set -e
+#inotifywait -q -m --format '%f' -e close_write --exclude "^$DAILY_LOG_DIR/buildtime\.txt$" "$DAILY_LOG_DIR" > $inotifyPipe&
+inotifywait -q -m --format '%f' -e close_write "$DAILY_LOG_DIR" > $inotifyPipe&
+set +e
+inotifywaitPID=$!
+
+# Trap so we cleanup before exit
+trap cleanup SIGINT SIGTERM
+
+# Read names of modified files from inotify pipe
+exec 5< $inotifyPipe
+while read <&5 filename
+do
+
+    if [ -n "$filename" ]
+    then
+
+	if [ $filename == $makeresultfile ]; then
+	    echo "Top make finished"
+	    break
+	fi
+	
+	if [ ${filename:0:6} == "result" ]; then
+	    filename=${filename/"result_"/""}
+	    component=$(echo ${filename%.txt} | sed -e 's!_!/!g' -e 's!//!_!g')
+
+	    ((buildCounter++))
+            prestr="$buildCounter/$totalComponents"
+            templ="%${padding}s"
+            printf "$templ" $prestr
+            echo " $component"
+	fi
+
+    fi
+
+    filename=""
+done
+
+# Cleanup
+kill $inotifywaitPID &> /dev/null
+rm -f $inotifyPipe
+echo "Build finished"
+endTime=${SECONDS}
+
+buildTimeInSeconds=`expr ${endTime} - ${startTime}`
+hours=$((buildTimeInSeconds / 3600))
+seconds=$((buildTimeInSeconds % 3600))
+minutes=$((buildTimeInSeconds / 60))
+seconds=$((buildTimeInSeconds % 60))
+
+problematicDirs=$(grep "Error 2" $DAILY_LOG_DIR/result_* 2>/dev/null | \
+    cut -d':' -f1 | uniq | \
+    sed -rn 's!.*/[^_]*_(.*)\.txt!\1!gp' | \
+    sed -e 's!_!/!g' -e 's!//!_!g')
+buildErrors=$(echo "$problematicDirs" | wc -w)
+
+if [ -f $DAILY_LOG_DIR/MakeReturnCode ]; then
+    makeResult=$(cat $DAILY_LOG_DIR/MakeReturnCode)
+else
+    makeResult="0"
+fi
+
+echo "MAKERESULT=$makeResult"
+if test "$makeResult" -ne 0 && test -z $problematicDirs; then
+    problematicDirs="$PWD"
+    rep=""
+    echo "RD=$rootdir"
+    problematicDirs=${problematicDirs/"$rootdir/"/""}
+    buildErrors=1
+fi
+
+
+# Remove not needed log files
+find $DAILY_LOG_DIR -name 'result_*' ! -exec grep -q 'Error 2' {} \; -print | xargs rm
+rm $DAILY_LOG_DIR/buildtime.txt
+rm $DAILY_LOG_DIR/componentcache.txt
+rm $DAILY_LOG_DIR/MakeReturnCode
+
+echo -e "\n====================================================================="
+echo "Logs can be found here: $DAILY_LOG_DIR"
+if [ ! $buildCounter -eq 0 ]; then
+    echo -e "Total number of built components: $buildCounter "
+fi
+echo "Approximate build time: $hours hour(s) $minutes minute(s) $seconds second(s)"
+
+
+if [ "$buildErrors" -ne "0" ]; then
+    echo -e "FAILURE\nThe build contains $buildErrors error(s) (see below)"
+    echo -e "$problematicDirs"
+    echo "====================================================================="
+    echo "If you are lucky you will find the problematic component(s) above"
+    echo "Try issuing a 'make -C <path-to-component>' to start debugging"
+    exit 2
+else
+    echo "====================================================================="
+fi
+

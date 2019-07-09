@@ -1,0 +1,7 @@
+#!/bin/bash
+
+USER=`id -nu`
+if [ -z "${REMOTEUSER}" ]; then
+    echo "Note: REMOTEUSER is undefined. Using USER instead."
+    REMOTEUSER=$USER
+fi

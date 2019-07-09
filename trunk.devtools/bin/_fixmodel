@@ -1,0 +1,20 @@
+#!/bin/bash
+
+model=$STBMODEL
+if [ "$1" = "-m" ]; then
+    shift
+    model=$1
+    shift
+fi
+
+# Convert the model name to lower case (Only for bash 4.0+)
+# Once bash 4 is considered standard we can start using this again.
+# model=${model,,}
+
+# Convert the model name to lower case (bash < 4.0)
+lowercase=$(echo $model | tr '[:upper:]' '[:lower:]')
+
+# Add the prefix "vip" to model names starting with digits
+if [[ $model =~ ^[[:digit:]][[:digit:]] ]]; then
+   model=vip$model
+fi

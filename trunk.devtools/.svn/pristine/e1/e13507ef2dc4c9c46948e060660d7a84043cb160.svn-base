@@ -1,0 +1,71 @@
+#!/usr/bin/env python2
+
+USAGE = """%prog [-h|--help] [-d|--diff] [-i|--inplace] FILE...
+
+This program reformats one or several C or C++ files to comply with the KreaTV
+coding standard. It is by no means perfect, so there is no guarantee that the
+output will be 100% correct according to the standard, but it should handle the
+majority of cases. Note that only reformatting is supported - no actual code
+changes like renaming or other restructuring are done."""
+
+from optparse import OptionParser
+from os import rename
+from os.path import dirname, exists, realpath
+from re import sub
+from subprocess import call, Popen, PIPE
+from sys import argv, stdin, stdout
+from tempfile import NamedTemporaryFile
+
+
+def main():
+    parser = OptionParser(usage=USAGE)
+    parser.add_option(
+        "-d",
+        "--diff",
+        action="store_true",
+        help="print diff (in unified format) instead of the new file")
+    parser.add_option(
+        "-i",
+        "--in-place",
+        action="store_true",
+        help="update file in-place (default is to print to stdout)")
+    (options, source_paths) = parser.parse_args()
+
+    top_dir = dirname(realpath(argv[0])) + "/.."
+    conf_path = top_dir + "/etc/kreatv-uncrustify.conf"
+    uncrustify_binary = top_dir + "/3pp/uncrustify/uncrustify_prebuilt"
+
+    if len(source_paths) == 0:
+        parser.error("at least one source code file must be specified")
+    if options.diff and options.in_place:
+        parser.error("can't specify both -d/--diff and -i/--in-place")
+    if not exists(uncrustify_binary):
+        if call("which uncrustify >/dev/null 2>&1", shell=True) != 0:
+            parser.error("please install the uncrustify package")
+        else:
+            uncrustify_binary = "uncrustify"
+
+    for path in source_paths:
+        if path == "-":
+            temporary_file = NamedTemporaryFile()
+            temporary_file.write(stdin.read())
+            temporary_file.flush()
+            path = temporary_file.name
+        command = [uncrustify_binary, "-c", conf_path, "-f", path]
+        p = Popen(command, stdout=PIPE, stderr=PIPE)
+        (uncrustified_code, error_message) = p.communicate()
+        if p.returncode != 0:
+            parser.error(error_message)
+        if options.diff:
+            p = Popen(["diff", "-u", path, "-"], stdin=PIPE, stdout=PIPE)
+            (diff, _) = p.communicate(uncrustified_code)
+            diff = sub("(?m)^\+\+\+ -", "+++ " + path, diff)
+            stdout.write(diff)
+        elif options.in_place:
+            rename(path, path + ".old")
+            open(path, "w").write(uncrustified_code)
+        else:
+            stdout.write(uncrustified_code)
+
+
+main()

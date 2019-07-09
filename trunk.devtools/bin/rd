@@ -1,0 +1,342 @@
+#!/usr/bin/python
+
+import telnetlib
+import ConfigParser
+
+from optparse import OptionParser
+
+import sys
+import os
+import subprocess
+import pty
+import signal
+import select
+
+STDIN, STDOUT = 0, 1
+
+def GenerateWrapperMakefile():
+    m = open("/tmp/genMakefile.mk", "w")
+    m.write("include Makefile\ngetvar-%:\n\t@echo $($*)")
+    m.close()
+
+def GetMakeSystemVariable(variable, target=""):
+    return os.popen("NO_ICECC=1 NO_CCACHE=1 TARGET="
+                    + target + " make -f /tmp/genMakefile.mk getvar-"
+                    + variable).read()[:-1]
+
+class Settings:
+    def __init__(self):
+
+        self.box = None
+        self.basePort = 10000
+        self.port = None
+        self.useMakesystem = False
+        self.gdbBinary = "gdb"
+        self.gdbScript = "rd.gdb"
+        self.sysRoot = ''
+        self.solibSearchPath = None
+        self.remotePid = None
+        self.file = None
+        self.target = None
+        self.shouldStartGDBServer = True
+
+    def __str__(self):
+        tmp = ""
+        if self.file:
+            tmp += "File: " + self.file + "\n"
+        if self.box:
+            tmp += "Box: " + self.box + "\n"
+        if self.basePort:
+            tmp += "Base port number: " + str(self.basePort) + "\n"
+        if self.port:
+            tmp += "Port: " + str(self.port) + "\n"
+        if self.useMakesystem:
+            tmp += "Use makesystem: " + str(self.useMakesystem) + "\n"
+        if self.gdbBinary:
+            tmp += "GDB binary: " + self.gdbBinary + "\n"
+        if self.gdbScript:
+            tmp += "GDB script: " + self.gdbScript + "\n"
+        if self.sysRoot:
+            tmp += "System root: " + self.sysRoot + "\n"
+        if self.solibSearchPath:
+            tmp += "Solib search path: " + self.solibSearchPath + "\n"
+        if self.remotePid:
+            tmp += "Remote pid: " + self.remotePid + "\n"
+        if self.target:
+            tmp += "Target: " + self.target + "\n"
+        if self.shouldStartGDBServer:
+            tmp += "Should start gdbserver: "
+            tmp += str(self.shouldStartGDBServer) + "\n"
+
+        return tmp
+
+    def Validate(self):
+        if not self.file:
+            print "No executable given"
+            raise Exception(1)
+        if not self.port:
+            print "Could not determine port to use"
+            raise Exception(2)
+        if not self.remotePid and not self.port:
+            print "Could not determine pid of remote process"
+            raise Exception(3)
+        if not os.path.exists(self.gdbScript):
+            print "No valid gdb script file"
+            raise Exception(4)
+        self.ValidateBox()
+        self.ValidateTarget()
+
+    def ValidateBox(self):
+        if not self.box:
+            print "No box given"
+            raise Exception(5)
+
+    def ValidateTarget(self):
+        if self.useMakesystem:
+            GenerateWrapperMakefile()
+            targets = GetMakeSystemVariable("TARGET_NAME_VIP").split(" ")
+            if not self.target or self.target not in targets:
+                print ("No target given, can't use makesystem to determine"
+                       " paths")
+                raise Exception(6)
+
+class TelnetConnection:
+    def __init__(self, box):
+        print "Connecting to " + box
+        self.tn = telnetlib.Telnet(box)
+        self.tn.set_debuglevel(9)
+        self.tn.read_until("#")
+        print "... connected"
+
+    def GetRemotePidOf(self, file):
+        command = "pidof " + os.path.basename(file) + "\n"
+        self.tn.write(command)
+        return self.tn.read_until("#").split('\n')[1].split(' ')[0]
+
+    def StartGDBServer(self, port, remotePid):
+        self.tn.write("gdbserver :" + str(port) + " --attach " + remotePid
+                      + "\n")
+        return self.tn.expect(["Listening on port", "Cannot", "not found"])[0]
+
+    def PrintAvailableProcesses(self):
+        self.tn.read_until("#")
+        self.tn.write("ps\n")
+        print "Available processes: " + self.tn.read_until("#")
+
+    def Close(self):
+        print "Closing down telnet"
+#        self.tn.write(chr(255))
+#        self.tn.write(telnetlib.IAC)
+#        self.tn.write(chr(243))
+        self.tn.close()
+
+class SubProcessGDB():
+    def __init__(self, settings):
+        self.settings = settings
+        self.master, self.slave = pty.openpty()
+        self.gdbProcess = subprocess.Popen([settings.gdbBinary],
+                                           stdin=self.slave,
+                                           close_fds=True)
+
+        signal.signal(signal.SIGINT, self.siginthandler)
+        self.Send("set pagination off\n")
+        self.Send("set sysroot " + settings.sysRoot + "\n")
+
+        if settings.solibSearchPath:
+            self.Send("set solib-search-path " + settings.solibSearchPath
+                      + "\n")
+
+        self.Send("handle all nostop print\n")
+        self.Send("file " + settings.file + "\n")
+        self.Send("set confirm off\n")
+        self.Send("set verbose off\n")
+
+    def siginthandler(self, signum, frame):
+        self.gdbProcess.send_signal(signal.SIGINT)
+        self.Send("detach\n")
+
+    def Send(self, command):
+        os.write(self.master, command)
+        self.FlushOutput()
+
+    def FlushOutput(self):
+        while select.select([self.master], [], [], 0) != ([], [], []):
+            print os.read(self.master, 1024)
+
+    def Terminate(self):
+        self.gdbProcess.terminate()
+
+    def RunDebug(self):
+        self.Send("target remote " + self.settings.box + ":"
+                  + str(self.settings.port) + "\n")
+        self.Send("source " + self.settings.gdbScript + "\n")
+        self.Send("continue\n")
+
+        self.Send("detach\n")
+        self.Send("quit\n")
+
+        tryAgain = True
+
+        while tryAgain:
+            try:
+                if self.gdbProcess.wait() == 0:
+                    tryAgain = False
+            except OSError:
+                pass
+        print "Ending"
+
+def ReadConfigurationFile(settings):
+    # Read configuration from file
+    config = ConfigParser.RawConfigParser()
+    config.read(os.path.expanduser('~/.rd.conf'))
+
+    if config.has_option('Box', 'ip'):
+        settings.box = config.get('Box', 'ip')
+
+    if config.has_option('Box', 'base_port'):
+        settings.basePort = config.getint('Box', 'base_port')
+
+    if config.has_option('Gdb', 'script'):
+        tmp = config.get('Gdb', 'script')
+        if os.path.exists(tmp):
+            settings.gdbScript = tmp
+
+    if config.has_option('Gdb', 'use_makesystem'):
+        settings.useMakesystem = config.getboolean('Gdb', 'use_makesystem')
+
+    if config.has_option('Gdb', 'target'):
+        settings.target = config.get('Gdb', 'target')
+
+    if config.has_option('Gdb', 'command'):
+        tmp = settings.gdbBinary = config.get('Gdb', 'command')
+        if os.path.exists(tmp):
+            settings.gdbBinary = tmp
+
+    if not settings.useMakesystem:
+        if config.has_option('Gdb', 'sysroot'):
+            tmp = config.get('Gdb', 'sysroot')
+            if os.path.exists(tmp):
+                settings.sysRoot = tmp
+
+        if config.has_option('Gdb', 'solib-search-path'):
+            settings.solibSearchPath = config.get('Gdb', 'solib-search-path')
+
+def ParseOptions(settings):
+    optionParser = OptionParser("usage: %prog [options] binary")
+    optionParser.add_option(
+        "-p", "--port", dest="port",
+        help="try to connect to port, don't start gdbserver")
+    optionParser.add_option(
+        "-r", "--remotepid", dest="remotepid",
+        help="attach to REMOTEPID, don't try to auto detect")
+    optionParser.add_option(
+        "-b", "--box", dest="box",
+        help="ip address of the box")
+    optionParser.add_option(
+        "-s", "--script", dest="script",
+        help="run commands in SCRIPT")
+
+# Hmm, gdb python seems to do something bad with argv
+#    arguments = ['rd-py']
+#    arguments.extend(sys.argv)
+#    sys.argv = arguments
+
+    (options, args) = optionParser.parse_args()
+
+    if len(args) < 1:
+        optionParser.error("No binary was given")
+
+    settings.file = args[0]
+
+    if options.box:
+        settings.box = options.box
+
+    if options.script:
+        if os.path.exists(options.script):
+            settings.gdbScript = options.script
+
+    if options.remotepid:
+        settings.remotePid = options.remotepid
+
+    if options.port:
+        settings.port = options.port
+    elif settings.remotePid:
+        settings.port = settings.basePort + int(settings.remotePid)
+
+    if settings.port:
+        settings.shouldStartGDBServer = False
+        print "Port: " + str(settings.port)
+
+def main():
+    global gdbProcess
+
+    settings = Settings()
+
+    ReadConfigurationFile(settings)
+
+    ParseOptions(settings)
+
+    try:
+        settings.ValidateBox()
+        settings.ValidateTarget()
+    except Exception, reason:
+        sys.exit(int(reason.args[0]))
+
+    if settings.useMakesystem:
+        GenerateWrapperMakefile()
+        baseDir = GetMakeSystemVariable("TOOLCHAIN_DIR", settings.target)
+        baseDir += "/" + GetMakeSystemVariable("TARGET_ARCH", settings.target)
+        settings.sysRoot = baseDir + "/sys-root/"
+        settings.solibSearchPath = os.path.abspath(
+            GetMakeSystemVariable("__lib_dir", settings.target)) + ":"
+        settings.solibSearchPath += os.path.abspath(
+            GetMakeSystemVariable("__3pp_lib_dir", settings.target)) + ":"
+        settings.solibSearchPath += settings.sysRoot + "lib/:"
+        settings.solibSearchPath += settings.sysRoot + "usr/lib/:"
+        settings.solibSearchPath += baseDir + "/lib/"
+
+    if settings.shouldStartGDBServer:
+        tc = TelnetConnection(settings.box)
+
+        if not settings.remotePid:
+            settings.remotePid = tc.GetRemotePidOf(settings.file)
+
+        if settings.remotePid:
+            settings.port = settings.basePort + int(settings.remotePid)
+
+        tc.Close()
+
+    print settings
+
+    try:
+        settings.Validate()
+    except Exception, reason:
+        sys.exit(int(reason.args[0]))
+
+    gdb = SubProcessGDB(settings)
+
+    if settings.shouldStartGDBServer:
+        tc = TelnetConnection(settings.box)
+        result = tc.StartGDBServer(settings.port, settings.remotePid)
+
+        if result == 1:
+            gdb.Terminate()
+            print ("\nFailed to connect to remote pid " + settings.remotePid
+                   + "\n")
+            tc.PrintAvailableProcesses()
+            tc.Close()
+            sys.exit(3)
+        elif result == 2:
+            print ("\ngdbserver doesn't seem to exist on box, did you add"
+                   " kreatv-tool-gdbserver?\n")
+            gdb.Terminate()
+            tc.Close()
+            sys.exit(4)
+
+    gdb.RunDebug()
+
+    if settings.shouldStartGDBServer:
+        tc.Close()
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,59 @@
+#!/bin/sh
+
+set -eu
+
+# Default to current dir if none is given
+path="${1:-.}"
+
+if [ "$path" = "-h" -o "$path" = "--help" ]; then
+  echo "Usage: $0 [path to check]"
+  echo ""
+  echo "Runs the pre-commit hook that checks coding style locally with more"
+  echo "verbose output to help find the problematic lines."
+  exit 0
+fi
+
+script="$(which "$0" 2>/dev/null || echo "/home/tools/foo")"
+script="$(dirname "$script")/.sanity-checks/check-coding-style.pl"
+
+if [ ! -x "$script" ]; then
+  echo "Error: Could not find check-coding-style.pl" >&2
+  exit 1
+fi
+
+if ! which filterdiff lsdiff >/dev/null 2>&1; then
+  echo "Error: filterdiff or lsdiff not found, please install patchutils" >&2
+  exit 1
+fi
+
+if ! which pep8 >/dev/null 2>&1; then
+  echo "Error: pep8 not found, please install pep8 (yum install python-pep8)" >&2
+  exit 1
+fi
+
+if ! which pyflakes >/dev/null 2>&1; then
+  echo "Error: pyflakes not found, please install pyflakes (yum install pyflakes)" >&2
+  exit 1
+fi
+
+if git status "$path" > /dev/null 2>&1; then
+  diff_cmd="git diff --no-prefix --relative --"
+elif svn info "$path" > /dev/null 2>&1; then
+  diff_cmd="svn diff --no-diff-deleted"
+else
+  echo "$path is not a Git or SVN working directory"
+  exit 1
+fi
+
+for file in $($diff_cmd "$path" | lsdiff --include "*.py"); do
+  pep8 --repeat "$file" || true to not stop on the first file failing pep8 test
+  pyflakes "$file" || true to not stop on the first file failing pyflakes test
+done
+
+for file in $($diff_cmd "$path" | lsdiff --include "*.php"); do
+  php -n -l "$file" 2>&1 | sed -nr "s|^Parse error: +(.+) in $file on line ([0-9]+)|$file:\2: \1|p"
+done
+
+$diff_cmd "$path" |
+  filterdiff -x '*3pp/*' -i '*.cpp' -i '*.c' -i '*.h' -i '*.js' -i '*.php' |
+  perl "$script"

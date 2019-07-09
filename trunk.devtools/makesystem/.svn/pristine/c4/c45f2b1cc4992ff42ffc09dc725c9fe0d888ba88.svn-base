@@ -1,0 +1,30 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => 'all';
+use File::Basename;
+
+my ($libpath, $linkmap) = @ARGV;
+my %libraries;
+
+# We may get called without an existing linkmap, for instance for test targets
+# that are not ELF binaries.
+open(my $f, $linkmap) or exit;
+
+while (<$f>) {
+    if (/^Archive member included because of/../^Discarded input sections/) {
+        $libraries{$1} = 1 if /^(\S+)\(/;
+    }
+}
+close($f);
+
+my $libname = basename($libpath);
+
+print "LIBDEPENDS_$libname = " . join(' ', keys %libraries);
+print "\n\n";
+
+print "$libpath: \$(LIBDEPENDS_$libname)";
+print "\n\n";
+
+# Add dummy rules to avoid errors when libs are removed (as gcc -MP)
+print "$_:\n\n" foreach (keys %libraries);

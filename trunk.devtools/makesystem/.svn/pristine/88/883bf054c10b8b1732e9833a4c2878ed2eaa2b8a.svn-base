@@ -1,0 +1,167 @@
+#!/usr/bin/python
+
+# How to generate a new config.cache file (all commands shall be run from the
+# root dir):
+#
+#  * Check out a fresh branch.
+#  * Empty the cache by running "echo > makesystem/config.cache".
+#  * Build the complete branch with NO_COMPONENTCACHE=1.
+#  * Run "find -name config.cache | xargs makesystem/generate_config_cache >
+#    makesystem/config.cache".
+#  * Perform the above steps on CentOS 6 and the latest Fedora and make sure
+#    they are consistent.
+
+import fileinput
+import re
+
+result = {}
+count = {}
+
+for line in fileinput.input():
+    if re.match(r"^(#|\s)", line):
+        continue
+    m = re.match("^(?P<key>\w*?)=(?P<value>.*)", line)
+    if m:
+        (key, value) = (m.group("key"), m.group("value"))
+        if key in result:
+            count[key] += 1
+            if result[key] != value:
+                result[key] = None
+        else:
+            result[key] = value
+            count[key] = 1
+
+whitelist = """
+(?x)
+(ac_cv_(__attribute__|
+        c_(compiler_gnu|const|inline|volatile)|
+        cxx_compiler_gnu|
+        exeext|
+        func_(abort|adjtimex|alarm|alloca_works|atexit|atof|atoi|atol|
+              basename|bcmp|bcopy|bsearch|btowc|bzero|
+              calloc|clearenv|clock|clock_gettime|clock_settime|connect|
+              ctime|
+              daemon|dladdr|dlopen|dup2|
+              endpwent|endutent|execv|
+              fchown|fcntl|fdatasync|fdopen|ffs|fgets_unlocked|fork|
+              fork_works|fprintf|free|freeaddrinfo|freeifaddrs|fseeko|
+              ftime|ftello|ftime|ftruncate|fwprintf|
+              gai_strerror|getaddrinfo|getc_unlocked|getclock|getcwd|
+              getdtablesize|getegid|getenv|geteuid|getgid|gethostbyaddr|
+              gethostbyaddr_r|gethostbyname|gethostbymane_r|gethostent|
+              gethostname|getifaddrs|getmntent|getnameinfo|getopt|
+              getopt_long|getpagesize|getpid|getppid|getprotobyname|
+              getpwent|getpwnam|getpwuid|getpwuid_r|getrlimit|getrusage|
+              getservbyport_r|getsysinfo|gettimeofday|getuid|getutent|
+              getutid|getutline|gmtime_r|
+              hstrerror|
+              iconv|if_indextoname|if_nametoindex|index|inet_addr|
+              inet_ntop|inet_pton|insque|ioctl|isascii|
+              kill|
+              localtime|localtime_r|localtime_r|logout|logwtmp|lseek64|
+              lstat|
+              madvise|mallinfo|malloc|mbrlen|mbrtowc|mbsrtowcs|mbstowcs|
+              memalign|memccpy|memchr|memcmp|memcpy|memmem|memmove|mempcpy|
+              memrchr|memset|mkdir|mkdtemp|mkstemp|mktime|mmap|mprotect|
+              msync|munmap|
+              nanosleep|nice|
+              on_exit|opendir|openlog|
+              perror|pipe|poll|posix_fadvise|posix_memalign|prctl|pread|
+              printf|psignal|putenv|pututline|pwrite|
+              qsort|
+              rand|rand_r|random|readdir|readlink|realpath|recv|
+              recvfrom|recvmsg|regcomp|remove|rename|rindex|
+              sbrk|select|select_args|sem_init|send|sendfile|setbuf|
+              setbuffer|setenv|setgid|setitimer|setjmp|setlinebuf|
+              setlocale|setmntent|setpgid|setpgrp|setpgrp_void|setpriority|
+              setregid|setresgid|setresuid|setreuid|setrlimit|setsid|
+              setsockopt|settimeofday|setuid|setutent|setvbuf|shmat|
+              sigaction|siginterrupt|signal|signalfd|sigprocmask|sigset|
+              sigsetjmp|sigsetmask|sigsuspend|sigvec|sigwaitinfo|snprintf|
+              socket|socketpair|sprintf|sqrt|srand|srandom|sscanf|stat|
+              stime|stpcpy|stpncpy|strcasecmp|strcat|strchr|strcmp|strcpy|
+              strcspn|strdup|strerror|strerror_r|strftime|strlen|
+              strncasecmp|strncat|strncmp|strncpy|strndup|strnlen|strpbrk|
+              strptime|strrchr|strsep|strsignal|strspn|strstr|strtod|
+              strtok|strtok_r|strtol|strtoll|strtoul|strtoull|syscall|
+              sysconf|sysctl|system|
+              tcgetattr|tcgetpgrp|time|timegm|timer_create|timer_settime|
+              times|tmpnam|toupper|truncate|tsearch|
+              umask|uname|unlink|unsetenv|updwtmp|usleep|utime|utimes|
+              utmpname|
+              valloc|vasprintf|vfork|vfork_works|vfprintf|vprintf|
+              vsnprintf|vsprintf|
+              wait3|wait4|waitpid|wscdup|wcslen|wctomb|wctype|wcwidth|
+              writev)|
+         have_decl_(calloc|ffs|fprintf|free|fseeko|ftello|getc_unlocked|
+                    getenv|getopt|llseek|lseek64|malloc|realloc|sbrk|
+                    snprintf|stpcpy|strerror|strstr|vasprintf|vsnprintf)|
+         header_(alloca|arpa_inet|arpa_nameser|arpa_nameser_compat|
+                 arpa_tftp|assert|
+                 ctype|
+                 dirent|dirent_dirent|dlfcn|
+                 endian|errno|
+                 fcntl|features|float|
+                 getopt|
+                 iconv|inttypes|
+                 libgen|limits|locale|
+                 malloc|math|memory|mqueue|
+                 net_if|net_route|netdb|netinet_in|netinet_tcp|netinet_udp|
+                 poll|pthread|pwd|
+                 regex|resolv|
+                 sched|setjmp|sgtty|signal|socket|stdarg|stdbool|stddef|
+                 stdint|stdio|stdio_ext|stdlib|string|strings|
+                 sys_(file|ioctl|ipc|mman|param|poll|prctl|resource|select|
+                      shm|socket|stat|termios|time|types|un|wait)|
+                 syslog|
+                 termio|termios|time|
+                 unistd|utime|utmp|
+                 wchar)_h|
+         header_(stdc|time)|
+         lib_(dl_dlopen|
+              m_(cos|pow|sqrt))|
+         objext|
+         prog_(AWK|cc_(c89|c99|g)|cxx_g|egrep|fgrep|gcc_traditional|
+               make_make_set)|
+         type_(bool|
+               in_addr_t|int|int16_t|int32_t|int64_t|int8_t|int_fast32_t|
+               int_least32_t|intptr_t|
+               long|long_long|long_long_int|
+               mode_t|
+               off_t|
+               pid_t|ptrdiff_t|
+               signal|size_t|socklen_t|ssize_t|
+               u_int16_t|u_int32_t|u_int64_t|u_int8_t|uid_t|uint16_t|
+               uint32_t|uint64_t|uint8_t|uintmax_t|uintptr_t|
+               unsigned_long_long|unsigned_long_long_int|
+               wchar_t|wint_t))|
+lt_(lt_)?cv_prog_(compiler_(c_o(_CXX)?|
+                            pic(_works)?(_CXX)?|
+                            rtti_exceptions)|
+                  gnu_(ld|ldcxx)))
+$
+"""
+
+print """\
+# This file contains configure results that should be certain to be the same
+# for all different toolchains (including host). Primarily restricted to
+# compiler and libc functionality.
+"""
+
+for key in sorted(result.keys()):
+    if not re.match(whitelist, key):
+        continue
+    value = result[key]
+    if value is None:
+        print "# {0}".format(key)
+    else:
+        print "{0}={1}".format(key, value)
+
+print """
+# Some special optimizations for c-ares and curl.
+
+curl_cv_func_getnameinfo_args=${curl_cv_func_getnameinfo_args='const struct sockaddr *,socklen_t,size_t,int'}
+curl_cv_func_recv_args=${curl_cv_func_recv_args='int,void *,size_t,int,ssize_t'}
+curl_cv_func_recvfrom_args=${curl_cv_func_recvfrom_args='int,void *,size_t,int,struct sockaddr *,socklen_t *,ssize_t'}
+curl_cv_func_select_args=${curl_cv_func_select_args='int,fd_set *,struct timeval *,int'}
+curl_cv_func_send_args=${curl_cv_func_send_args='int,const void *,size_t,int,ssize_t'}"""

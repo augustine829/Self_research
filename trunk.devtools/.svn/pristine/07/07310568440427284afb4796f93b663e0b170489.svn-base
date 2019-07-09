@@ -1,0 +1,125 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2014-2015 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+import codecs
+import locale
+import optparse
+import re
+import sys
+import unittest
+
+from os.path import dirname, realpath
+
+sys.path.insert(0, dirname(realpath(__file__)) + "/../lib")
+from pycommon.svnuserscache import get_svn_users, update_cache
+
+DESCRIPTION = """\
+This program prints "<username>: <Firstname> <Lastname> [comment]" for one or
+several Subversion users. You can search for a Subversion username, a first
+name or a last name or a substring of any of those names.
+"""
+LDAP_SERVER = "idsblue.arrisi.com"
+LDAP_RESPONSE_TIMEOUT = 3  # Seconds
+
+
+def get_location(coreid):
+    import ldap
+    connection = ldap.open(LDAP_SERVER)
+    connection.simple_bind_s()
+    result_id = connection.search("", ldap.SCOPE_SUBTREE, "motguid=" + coreid)
+    _, result = connection.result(result_id, timeout=LDAP_RESPONSE_TIMEOUT)
+    if not result:
+        return None
+    user_attributes = result[0][1]
+    return user_attributes["l"][0] if "l" in user_attributes else None
+
+
+def look_up_users(args, match_exact_username=False, fetch_location=False):
+    users = get_svn_users()
+    for arg in args:
+        for (coreid, entry) in users.items():
+            (first, last) = (entry["name"], entry["surname"])
+            if first or last:
+                name = re.sub(u" +", u" ",
+                              u"{0} {1}".format(first, last)).strip()
+            else:
+                name = "<Unknown>"
+            if match_exact_username:
+                arg_matches = arg == coreid
+            else:
+                arg = arg.lower()
+                arg_matches = arg in coreid.lower() or arg in name.lower()
+            if arg_matches:
+                line = u"{0}: {1}".format(coreid, name)
+                if fetch_location:
+                    location = get_location(coreid)
+                    if location:
+                        line += ", %s" % location
+                if entry["comment"]:
+                    line += u" [{0}]".format(entry["comment"])
+                yield line
+
+
+class SelfTests(unittest.TestCase):
+    def __init__(self, *args):
+        unittest.TestCase.__init__(self, *args)
+        update_cache()
+
+    def test_exact_user_lookup(self):
+        self.assertEquals(list(look_up_users(["hbx843"], True)),
+                          [u"hbx843: Robert H\xf6gberg"])
+        self.assertEquals(list(look_up_users(["bx843"], True)), [])
+
+    def test_fuzzy_user_lookup(self):
+        self.assertEquals(list(look_up_users([u"robert H\xd6GBERG"])),
+                          [u"hbx843: Robert H\xf6gberg"])
+        self.assertEquals(list(look_up_users(["BX843", u"\xf6gber"])),
+                          [u"hbx843: Robert H\xf6gberg",
+                           u"hbx843: Robert H\xf6gberg"])
+
+    def test_unsuccessful_user_lookup(self):
+        self.assertEquals(list(look_up_users(["nobody"])), [])
+
+    def test_successful_location_lookup(self):
+        self.assertEquals(get_location("hbx843"), "Linkoping Sweden")
+
+    def test_unsuccessful_location_lookup(self):
+        self.assertEquals(get_location("nobody"), None)
+
+
+def main():
+    op = optparse.OptionParser(usage="%prog SVN_USERNAME_OR_NAME...",
+                               description=DESCRIPTION)
+    op.add_option("-l", "--location", action="store_true",
+                  dest="fetch_location",
+                  help="also print person's location if possible")
+    op.add_option("-u", "--exact-username", action="store_true",
+                  dest="match_exact_username",
+                  help="only look up an exactly matching username")
+    op.add_option("--self-test", action="store_true", dest="run_tests",
+                  help="run self-tests and exit")
+    (options, args) = op.parse_args()
+
+    if options.run_tests:
+        unittest.main(argv=sys.argv[:1])
+    if not args:
+        op.error("no search string given")
+
+    update_cache()
+    encoding = locale.getpreferredencoding()
+    sys.stdout = codecs.getwriter(encoding)(sys.stdout, errors="replace")
+    args = [arg.decode(encoding) for arg in args]
+    users = list(look_up_users(
+        args, options.match_exact_username, options.fetch_location))
+    for line in users:
+        print line
+    exit(0 if users else 1)
+
+
+main()

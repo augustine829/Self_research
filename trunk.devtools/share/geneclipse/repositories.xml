@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TaskRepositories OutputVersion="1">
+  <TaskRepository kind="bugzilla" url="http://kreatvbugzilla.ea.mot.com" version="unknown" encoding="UTF-8" timezone="Europe/Stockholm" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.usedefault="false" org.eclipse.mylyn.tasklist.repositories.savePassword="true" 
+                  org.eclipse.mylyn.tasklist.repositories.httpauth.savePassword="false" org.eclipse.mylyn.tasklist.repositories.proxy.savePassword="false" 
+                  org.eclipse.mylyn.tasklist.repositories.enabled="true" label="Bugzilla" org.eclipse.mylyn.tasklist.repositories.httpauth.enabled="false" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.hostname="" org.eclipse.mylyn.tasklist.repositories.proxy.port="" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.enabled="false" org.eclipse.mylyn.tasklist.repositories.offline="false" 
+                  editorExtension="org.eclipse.mylyn.wikitext.tasks.ui.editor.textileTaskEditorExtension" bugzilla.shortLoginEnabled="false" 
+                  bugzilla.languageSetting="en (default)"/>
+  <TaskRepository kind="bugzilla" url="https://ftp.kreatel.se/bugzilla" version="unknown" encoding="UTF-8" timezone="Europe/Stockholm" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.usedefault="false" org.eclipse.mylyn.tasklist.repositories.savePassword="true" 
+                  org.eclipse.mylyn.tasklist.repositories.httpauth.savePassword="false" org.eclipse.mylyn.tasklist.repositories.proxy.savePassword="false" 
+                  org.eclipse.mylyn.tasklist.repositories.enabled="true" label="External Bugzilla" org.eclipse.mylyn.tasklist.repositories.httpauth.enabled="false" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.hostname="" org.eclipse.mylyn.tasklist.repositories.proxy.port="" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.enabled="false" org.eclipse.mylyn.tasklist.repositories.offline="false" 
+                  editorExtension="org.eclipse.mylyn.wikitext.tasks.ui.editor.textileTaskEditorExtension" bugzilla.shortLoginEnabled="false" 
+                  bugzilla.languageSetting="en (default)"/>
+  <TaskRepository kind="local" url="local" version="1" encoding="UTF-8" timezone="Europe/Stockholm" org.eclipse.mylyn.tasklist.repositories.proxy.usedefault="true" 
+                  org.eclipse.mylyn.tasklist.repositories.savePassword="true" org.eclipse.mylyn.tasklist.repositories.httpauth.savePassword="true" 
+                  org.eclipse.mylyn.tasklist.repositories.proxy.savePassword="true" label="Local"/>
+</TaskRepositories>

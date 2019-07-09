@@ -1,0 +1,48 @@
+#! /bin/sh
+#
+# This script runs a command and then pops up a notification using
+# notify-send(1) when the command has finished.
+#
+# Example usage:
+#
+#     notify make -j2 -C some/subdir
+
+set -u
+
+numerus() {
+    if [ $1 -ne 1 ]; then
+        echo s
+    fi
+}
+
+format_time() {
+    seconds=$(($1 % 60))
+    minutes=$((($1/60) % 60))
+    hours=$(($1/3600))
+    result="$seconds second$(numerus $seconds)"
+    if [ $minutes -ne 0 ]; then
+        result="$minutes minute$(numerus $minutes), $result"
+    fi
+    if [ $hours -ne 0 ]; then
+        result="$hours hour$(numerus $hours), $result"
+    fi
+    echo "$result"
+}
+
+start_time=$(date +%s)
+"$@"
+exitcode=$?
+elapsed_time=$(($(date +%s) - $start_time))
+
+body="Time: $(format_time $elapsed_time)
+In: $(hostname):$(pwd)"
+
+if [ $exitcode -eq 0 ]; then
+    notify-send -t 0 "Finished: $*" "$body"
+else
+    body="$body
+Error code: $exitcode"
+    notify-send -t 0 -u critical "FAILED: $*" "$body"
+fi
+
+exit $exitcode

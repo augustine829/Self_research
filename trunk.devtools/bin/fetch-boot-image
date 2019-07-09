@@ -1,0 +1,169 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+usage() {
+    cat <<EOF
+Usage:
+    fetch-boot-image [OPTION]... BRANCH[:COMMIT] [BOOT-IMAGE [PRODUCT]]
+
+    This script downloads a boot image for a specified kreatv branch from
+    https://devhub.arrisi.com. The boot image will be built on demand if
+    required.
+
+    If just BRANCH[:COMMIT] is given, it will list available boot images/device
+    combinations on that branch. The items on the list can be used as the
+    BOOT-IMAGE argument.
+
+    If just BRANCH[:COMMIT] and BOOT-IMAGE are given, it will list available
+    products for that boot image on that branch. The items on the list can be
+    used as the PRODUCT argument.
+
+    If all arguments including PRODUCT are given, it will download a file.
+
+Options:
+    BRANCH
+           Branch/tag in the kreatv Git repository.
+    COMMIT
+           Hash for a specific commit on BRANCH. If left out, it will default
+           to the latest commit on BRANCH with no build errors or warnings.
+    BOOT-IMAGE
+           Boot image/device combination, e.g. katt/vip28x3.
+    PRODUCT
+           Product, e.g. bi or rootdisk. The valid set of products may be
+           different depending on the chosen boot image.
+    -h / --help
+           Show this help text.
+    -o / --output_path <path>
+           Put downloaded boot images in this directory. Default is the
+           current directory.
+EOF
+}
+
+help() {
+    >&2 cat <<EOF
+For usage information run: fetch-boot-image -h
+EOF
+    exit 1
+}
+
+
+base_uri="https://devhub.arrisi.com/boot-images"
+
+branch=
+boot_image=
+product=
+output_dir=.
+
+while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
+    case $arg in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -o|--output)
+            output_dir=$1
+            shift
+            ;;
+        *)
+            if [ -z "$branch" ]; then
+                branch=$(echo $arg | sed -r "s/(heads|tags)\///")
+            elif [ -z "$boot_image" ]; then
+                boot_image=$arg
+            elif [ -z "$product" ]; then
+                product=$arg
+            else
+                >&2 echo "Error: Too many arguments"
+                help
+            fi
+            ;;
+    esac
+done
+
+if [ ! -d "$output_dir" ]; then
+    >&2 echo "Error: Directory $output_dir does not exist"
+    help
+fi
+
+if [ -z "$branch" ]; then
+    >&2 echo "Error: Missing BRANCH argument."
+    help
+fi
+
+output_dir=$(readlink -f $output_dir)
+
+tmp_dir=$(mktemp -d --tmpdir=$output_dir)
+function finish {
+    rm -rf $tmp_dir
+}
+trap finish EXIT
+
+
+get_curl_status() {
+    header=$1
+    cat $header | grep ^HTTP | tail -n 1 | cut -f 2- -d ' '
+}
+
+desc_error_404() {
+    >&2 echo "
+This could happen for a number of reasons:
+- The BRANCH does not exist on devhub.
+- The COMMIT does not exist or builds with error and/or warnings. See COMMIT in usage.
+- The COMMIT is not a push commit on devhub.
+- The BOOT-IMAGE does not exist. Run fetch-boot-image --help to see how to list available boot image/device combinations.
+- The PRODUCT is not built for chosen boot image. Run fetch-boot-image --help to see how to list available products.
+"
+}
+
+list() {
+    uri="$base_uri/kreatv:$branch"
+    if [ -n "$boot_image" ]; then
+        uri="$uri/$boot_image"
+    fi
+    uri="$uri?format=raw"
+
+    header=$(mktemp --tmpdir=$tmp_dir)
+    contents=$(mktemp --tmpdir=$tmp_dir)
+    curl --dump-header $header -s $uri > $contents
+    status=$(get_curl_status $header)
+    case $status in
+        200*)
+            cat $contents
+            ;;
+        404*)
+            >&2 echo "Error: $status"
+            desc_error_404
+            exit 1
+            ;;
+        *)
+            >&2 echo "Error: $status"
+            >&2 cat $contents
+            exit 1
+            ;;
+    esac
+}
+
+download() {
+    cd $tmp_dir
+    dwl_log=$(mktemp --tmpdir=$tmp_dir)
+    if wget --content-disposition "$base_uri/kreatv:$branch/$boot_image/$product" --content-on-error -nv 2>&1 | tee $dwl_log; then
+        rm $dwl_log
+        mv $tmp_dir/* $output_dir
+    elif egrep -q "404.*Not Found" $dwl_log; then
+        desc_error_404
+        exit 1
+    else
+        # The --content-on-error on wget will save error message to basename.
+        cat $product
+        exit 1
+    fi
+}
+
+if [ -n "$branch" -a -n "$boot_image" -a -n "$product" ]; then
+    download
+else
+    list
+fi

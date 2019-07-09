@@ -1,0 +1,8 @@
+#!/bin/sh
+#
+# This wrapper script runs prettysvn together with svn-mirror in fallback mode.
+
+export SVNMIRROR_REAL_SVN=/usr/bin/svn
+export PRETTYSVN_REAL_SVN=$(dirname $0)/svn-mirror-fallback
+
+exec $(dirname $0)/prettysvn "$@"

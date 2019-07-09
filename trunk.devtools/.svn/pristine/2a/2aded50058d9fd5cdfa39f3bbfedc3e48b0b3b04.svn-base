@@ -1,0 +1,23 @@
+#/bin/sh
+
+if [ $# -lt 2 ]; then
+   echo "Usage: $0 <SOURCE> <TARGET> [svn log options]*" >&2
+   exit 1
+fi
+
+SOURCE=$1
+shift
+TARGET=$1
+shift
+
+REVISIONS=
+
+for rev in $(svn mergeinfo --show-revs eligible $SOURCE $TARGET); do
+    REVISIONS="-$rev $REVISIONS"
+done
+
+if [ -n "$REVISIONS" ]; then
+    svn log $REVISIONS $@ $SOURCE
+else
+    echo "Nothing to merge."
+fi

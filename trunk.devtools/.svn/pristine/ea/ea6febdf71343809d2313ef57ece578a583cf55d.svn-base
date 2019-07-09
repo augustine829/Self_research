@@ -1,0 +1,33 @@
+#!/usr/bin/expect
+
+set tooldir [file dirname $argv0]
+system $tooldir/_checkenv -h
+
+set host $env(STBHOST)
+set command [join [lrange $argv 0 [llength $argv]] " "]
+
+spawn -noecho telnet "$host"
+
+log_user 0
+
+set timeout 2
+
+expect {
+  "#" { 
+    send "$command\n"
+    log_user 1
+  }
+  timeout {
+    send_user "STB $env(STBHOST) refused connection\n"
+    exit 1
+  }
+  -re "Unable to connect|Connection closed" {
+    send_user "STB $env(STBHOST) refused connection\n"
+    exit 1
+  }
+}
+
+expect "#" {
+  send "exit\n"
+  send_user "\n"
+}

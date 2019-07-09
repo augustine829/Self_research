@@ -1,0 +1,88 @@
+#!/usr/bin/env python2
+# -*- encoding: utf-8 -*-
+
+u"""
+  Working with mappings
+  ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+  codemapper add PATTERN GROUPNAME TRIGGERS_KATT2
+                                     add a mapping
+  codemapper clone MAPPING_ID        add a mapping interactively based on an
+                                     existing mapping
+  codemapper delete MAPPING_ID       delete a mapping
+  codemapper edit MAPPING_ID         edit a mapping interactively
+  codemapper find-orphans [PATH]     find files not matching any mapping's
+                                     pattern, optionally at a given path
+                                     (default: ".")
+  codemapper ignore PATTERN          add a pattern as being ignored
+  codemapper info MAPPING_ID         list a single mapping
+  codemapper list [GROUPNAME]        list all mappings, or all mappings for a
+                                     specific group
+  codemapper map [PATH]              list mappings whose pattern matches a
+                                     local path (default: ".") or a subfile or
+                                     or subdirectory of the path
+  codemapper map-diff [PATH]         list mappings whose pattern matches files
+                                     affected by a .diff/.patch file (or
+                                     standard input if path is not specified)
+  codemapper test MAPPING_ID [PATH]  list local files that match a mapping's
+                                     pattern, optionally at a given path
+                                     (default: ".")
+
+  Working with groups
+  ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+  codemapper group-add GROUPNAME     add a group
+  codemapper group-delete GROUPNAME  delete a group
+  codemapper group-list              list all groups
+  codemapper group-merge GROUPNAME1 GROUPNAME2
+                                     merge two groups into the second one
+  codemapper group-rename GROUPNAME NEW_GROUPNAME
+                                     rename a group
+
+Argument types:
+  GROUPNAME   a review group name, example: KreaTV_InterfaceReviewBoard
+  MAPPING_ID  an integer identifying a specific mapping
+  PATH        a file or directory
+  PATTERN     a pattern matching files and directories in the repository
+              (special wildcards: * (matches zero, one or several characters)
+              and ANYBRANCH (matches "trunk" or "branches/BRANCHNAME")),
+              example: dev:bsg/ANYBRANCH/bootimage/tools/*
+  TRIGGERS_KATT2
+              true or false to indicate if KATT level 2 testing should be
+              triggered for all tests with a matching KATTsuite of the given
+              GROUPNAME.
+
+About patterns:
+  - PATTERN consists of two parts: REPOSITORY:PATH.
+  - If the "REPOSITORY:" part of PATTERN is not specified, "dev:" is used by
+    default.
+  - If PATH in PATTERN matches a local path (and the "REPOSITORY:" part is not
+    specified), PATH is assumed to refer to the local path. For example, if
+    "codemapper add dir1/dir2 Group" is executed in an SVN working copy where
+    "dir1/dir2" exists, then the PATTERN will be
+    "dev:PROJECT/ANYBRANCH/PATH_IN_PROJECT/dir1/dir2/*", where PROJECT is the
+    project associated with the working copy and PATH_IN_PROJECT is the path
+    under which "dir1" is located in the project.
+  - If PATH in PATTERN does not match a local path (or the "REPOSITORY:" part
+    is specified), PATH is assumed to refer to a path in the repository.
+
+Subcommand aliases:
+  delete: del
+  find-orphans: fo
+  group-add: ga
+  group-delete: gd
+  group-list: gl
+  group-merge: gm
+  group-rename: gr
+  list: ls
+  map-diff: md\
+"""
+
+import sys
+from os.path import dirname, realpath
+sys.path.insert(0, dirname(realpath(__file__)) + "/../lib")
+from codemapper.main import main
+
+try:
+    exit_code = main(__doc__)
+except KeyboardInterrupt:
+    exit_code = 1
+sys.exit(exit_code)

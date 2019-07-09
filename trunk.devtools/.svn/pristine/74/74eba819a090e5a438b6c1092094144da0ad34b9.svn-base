@@ -1,0 +1,17 @@
+#!/bin/bash
+
+cd /home/tools/yum/repo || cd ~tools/yum/repo || exit 1
+
+if [ $# -ge 1 ]; then
+  VERBOSE=true
+fi
+
+logtools='kreatv-logtools-*.i386.rpm'
+devtools='kreatv-devtools-*.i386.rpm'
+
+if $VERBOSE rpm -U --test $logtools &> /dev/null; then
+  rpm -Uvh $logtools
+fi
+if $VERBOSE rpm -U --test $devtools &> /dev/null; then
+  rpm -Uvh $devtools
+fi

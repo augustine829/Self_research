@@ -1,0 +1,9 @@
+# ROOT=a/aa
+
+all:
+
+TREE_OSS_IGNORE = 
+
+TREEDIRS = 
+
+include $(MAKESYSTEM)/tree.mk

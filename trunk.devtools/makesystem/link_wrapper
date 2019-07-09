@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -eu
+
+args=()
+while test $# -gt 0; do
+    if ! expr "$1" : "-Wl,--version-script=" > /dev/null; then
+        args+=("$1")
+    fi
+    shift
+done
+
+exec "${args[@]}"

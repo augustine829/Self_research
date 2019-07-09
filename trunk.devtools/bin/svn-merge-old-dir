@@ -1,0 +1,71 @@
+#!/bin/sh
+
+usage() {
+   cat <<EOF
+Usage:
+    svn-merge-old-dir <old_dir> [<new_dir>]
+
+    old_dir   - Old directory of which's content has been moved
+    new_dir   - Corresponding new directory which was added. This argument
+                is not needed if there is a README-IF-CONFLICT.txt file in
+                the old directory stating to where the files were moved.
+
+    This tool is used after having rebased (but not yet committed) when the
+    contents of a directory has moved and you want your changes in the old
+    directory to be merged to the new directory.
+
+    1. You should see conflicts in code tree about removed files.
+    2. You should see them added some place else.
+    3. Run command in root of your code tree.
+EOF
+}
+
+if [ -z "$1" ]; then
+    usage
+    exit 0
+fi
+
+old_dir=$1
+
+if [ -z "$2" ]; then
+    # See if a README-IF-CONFLICT file states which is the new directory.
+    readme_file="$old_dir/README-IF-CONFLICT.txt"
+    if [ -e "$readme_file" ]; then
+        new_dir=`cat $readme_file | grep "The component has been moved to " | sed -e 's/The component has been moved to \(.*\)./\1/'`
+    else
+        usage
+        exit 1
+    fi
+else
+    new_dir=$2
+fi
+
+bsg_url='http://svn.arrisi.com/dev/bsg'
+your_branch=`svn info |grep ^URL |sed -e 's/URL: //'`
+point_of_creation=`svn log -l 1 -v --stop-on-copy -r '{2011-01-01}:HEAD' $your_branch |grep "A /bsg/" |sed -e 's!\(.*\)(from /bsg/\(.*\))!\2!'`
+base_branch=`echo $point_of_creation | sed -e 's!\(.*\):\(.*\)!\1!'`
+rev_of_creation=`echo $point_of_creation | sed -e 's!\(.*\):\(.*\)!\2!'`
+
+# Will be empty if not rebased:
+base_rev=`svn pg svn:mergeinfo $your_branch | grep "/bsg/$base_branch:" |sed -e 's!\(.*\)-\(.*\)!\2!'`
+
+if [ -z "$base_rev" ]; then
+    base_rev=$rev_of_creation
+fi
+
+echo "Your branch $your_branch is based on $base_branch r$base_rev."
+echo "Merging your changes in $old_dir to $new_dir by running command"
+echo " svn merge --ignore-ancestry "
+echo "                             $bsg_url/$base_branch/$old_dir@$base_rev"
+echo "                             $your_branch/$old_dir@HEAD"
+echo "                             $new_dir"
+
+svn merge --ignore-ancestry $bsg_url/$base_branch/$old_dir@$base_rev $your_branch/$old_dir@HEAD $new_dir
+
+in_conflict=$(svn st $old_dir | grep "C ")
+
+if [ -n "$in_conflict" ]; then
+    echo ""
+    echo "Files in $old_dir are still in conflict."
+    echo "Don't forget to run 'svn rm' and 'svn resolve --accept working' on them"
+fi

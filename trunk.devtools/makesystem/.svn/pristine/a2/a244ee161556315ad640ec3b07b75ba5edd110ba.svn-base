@@ -1,0 +1,28 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => 'all';
+
+# Parameters
+my $html_dir = shift;
+
+# Find files containing %ENV:<env>%
+my @files = `find $html_dir -name *.htm* -exec grep -l -E %ENV:.+?% {} \\;`;
+chomp @files;
+
+foreach my $file (@files) {
+    open(INFILE, "< $file") or die "Error: Could not open $file: $!";
+    # Do not treat input file as UTF-8
+    binmode INFILE;
+    my $contents = do { local $/; <INFILE> };
+    close INFILE;
+
+    while ($contents =~ m/%ENV:(.+?)%/g) {
+	my $var = $1;
+	$contents =~ s/%ENV:$var%/$ENV{$var}/;
+    }
+
+    open(OUTFILE, "> $file") or die "Error: Could not open $file: $!";
+    print OUTFILE $contents;
+    close OUTFILE;
+}

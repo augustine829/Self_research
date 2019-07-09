@@ -1,0 +1,120 @@
+<!-- @location resources/other/toolchain.html -->
+<!-- @title Toolchain -->
+
+Toolchain
+=========
+
+The KreaTV toolchain is a collection of programs needed to build the KreaTV
+software. It consists of binutils, gcc, linux headers and a libc.
+
+
+Development
+-----------
+
+Developing toolchains follow the same rules as any other component with a few
+exceptions.
+
+
+### Source code structure ###
+
+The source code is located in <http://svn.arrisi.com/dev/toolchain/>. Within
+that repository the toolchains currently in use for cross compiling are bcm15,
+bcm45, st710x and st9. The names do not necessarily follow the respective
+naming in the makesystem. In each toolchain repository the branches, deadwood,
+tags and trunk directories exist.
+
+Currently it is allowed to use trunk directly based on common sense. There has
+not been any need for controlled merge handling in the toolchain repository and
+as long as the amount of work is limited it is likely to stay that way. For
+major upgrades and work on older tags a branch is required in order to keep
+trunk usable.
+
+The structure of the repository is simple. Apart from the actual 3rd party
+components there are a few makefiles and a CHANGES file containing a brief
+version history.
+
+
+### Version numbering ###
+
+When developing a new version the `TOOLCHAIN_PATH` variable must be updated.
+The version number part should be changed to not interfere with any previously
+installed toolchain. The convention is to name it *x.y.z.suffix*, where *x.y.z*
+is the proposed new version number and *suffix* is a string either describing
+the feature or simply "working". The suffix must be dropped before the final
+build.
+
+Toolchains use "MAJOR.MINOR.PATCH" release numbers. The general idea is:
+
+1. Upgrading/downgrading between different patch releases in the same
+   MAJOR.MINOR line never breaks builds. It may cause bugfixes to
+   disappear/reappear, but the semantics remain the same. (Of course, the
+   semantics may change in the trivial ways appropriate for bugfixes.)
+
+2. Upgrading to a new minor release in the same major line may cause new
+   features or tools to appear, but not remove any. Any build that works with
+   the old minor number will work with any later minor number in that line.
+   However, downgrading afterwards may not work, if new code has been written
+   that takes advantage of the version.
+
+3. When the major number changes, all bets are off. The major version number
+   can also be stepped to mark other major changes that are not necessarily of
+   technical nature.
+
+
+### License information ###
+
+All parts of the toolchain (except for the linux kernel which also exists in
+the source tree) must have a corresponding 3PPLICENSE file. They are not
+checked until the source tree is built.
+
+**Note:** There exist GPLv3 components in the toolchain that have been cleared
+by OSRB and legal. They must stay unpatched by ARRIS in order to comply with
+the justification.
+
+
+### Linux kernel ###
+
+The linux kernel within the toolchain is for user space headers only. It shall
+be in sync with the corresponding kernel in the source tree as far as
+user-space APIs are concerned. Discrepancies may end up in missing syscalls or
+similar.
+
+
+Building
+--------
+
+A toolchain is always built from the root and does not support partial builds
+in general. Simply type `make` to build it. Building in parallel is supported.
+
+A build results in a fully installed toolchain on the current machine as well
+as two archives, one containing the binaries and another containing the full
+source code.
+
+
+### Automatic builds ###
+
+Automatic builds have been disabled by the kbs:build_steps svn property.
+
+
+### Release builds ###
+
+When all features have been verified follow this instruction:
+
+1. Set the version number, dropping the working suffix.
+2. Make sure the CHANGES file has been updated and contains correct and
+   relevant information as well as date and tag name.
+3. Build a release on a 64-bit CentOS 6 server, preferably
+   littlemill.lab.swelin.arrisi.com. This is to ensure the toolchain works from
+   CentOS 6 and later. As this is a requirement it may be wise to at least try
+   this server during development.
+4. Merge to trunk if needed.
+5. Tag the toolchain using `svn copy <trunk> <tag>`.
+6. [Upload](/resources/other/makesystem.html#uploading) the resulting tar files
+   to the binary repository. The .bref placeholders must be located in the
+   `toolchains` subdirectory in makesystem.
+
+**Note:** When a toolchain has been uploaded it will be downloaded by every
+build that needs it. Thus it may be cumbersome to revert such a release and
+reuse the same version number. It is allowed to upload a release candidate
+to the binary repository as long as it is appropriately marked and later
+requested to be removed. Make the request to sigbuild@arris.com.

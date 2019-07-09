@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -eu
+
+. $(dirname $0)/common.sh
+
+read verbose
+read username
+read password
+read wc_url
+read merge_id
+# The commandline arguments are arguments to "svn merge".
+
+if [ "$verbose" = true ]; then
+    quiet=""
+else
+    quiet="--quiet"
+fi
+
+wcdir="$remote_workdir/$merge_id"
+
+echo "Checking out on remote server..."
+svn checkout $quiet --no-auth-cache --username "$username" \
+    --password "$password" "$wc_url" $wcdir
+
+echo "Merging on remote server..."
+svn merge $quiet --no-auth-cache --username "$username" \
+    --password "$password" --accept postpone "$@" $wcdir

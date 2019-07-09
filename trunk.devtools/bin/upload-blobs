@@ -1,0 +1,79 @@
+#!/bin/bash
+# Uploads kernels and boot images to TFTP server
+# Environment variables used:
+#   BRANCH, the name of the branch you are working on
+#   CODEHOME, the path to where you have your branches, typically /extra/$USER
+#   TFTPHOST, Which server to put images on
+#   STBMODEL, The model to use (19x3, 28x3, 29x2...)
+#   STBCONFIG, The bootimage configuration to use, default is "custom"
+#   STBHWMODEL, The hardware version to use (e.g. 25 for some VIP1900 boxes).
+#   REMOTEUSER, the user id in TFTPHOST (default is $USER)
+#
+
+# In the DHCP config, make sure option Kreatel.tftp-kernel-filename
+# points to "/<your username>-<$STBMODEL>"; like "/apa123-vip1900";
+# Use use-bi script to switch to using boot image
+# Use use-nfs script to switch to using kernel + NFS mounted filesystem
+
+TOOLDIR=$(dirname $(which $0))
+${TOOLDIR}/_checkenv -m -b -c -t || exit 1
+
+. ${TOOLDIR}/_fixmodel
+. ${TOOLDIR}/_setremoteuser
+
+stbconfig="$STBCONFIG"
+if [ -z $stbconfig ]; then
+    stbconfig="custom"
+fi
+
+SOURCE_ROOT=${CODEHOME}/${BRANCH}/dist/products
+
+if [ -n "${BSG_BUILD_VERSION}" ]; then
+    BIVERSION=$(echo ${BSG_BUILD_VERSION} | sed 's/_/-/g')
+else
+    BIVERSION=$(echo ${BRANCH} | sed 's/_/-/g')
+fi
+
+bootimageroot="${SOURCE_ROOT}/kreat*-bi-${stbconfig}_*${BIVERSION}"
+
+# 3.x and 4.x bootimages have different naming standard:
+bootimage3="${bootimageroot}_${model}.bin"
+bootimage4="${bootimageroot}_${STBHWMODEL}_${model}.bin"
+
+if [ -e ${bootimage4} ]; then
+    # kreatv-bi-kreatvgfx_DEV-brassica_st40_vip19x0.bin
+    # kernel-nfs-kreatvgfx_DEV-brassica_st40_vip19x0
+    # kreatv-bi-sit-webkit-plain_INTERNAL-USE-ONLY_trunk_bcm45_vip29x2.bin
+    # kreatv-kernel-nfs-sit-webkit-plain_INTERNAL-USE-ONLY_trunk_bcm45_vip29x2
+
+    bootimage=${bootimage4}
+    nfs_kernel=${SOURCE_ROOT}/*kernel-nfs-${stbconfig}_*${BIVERSION}_${STBHWMODEL}_${model}
+elif [ -e ${bootimage3} ]; then
+    # kreatv-bi-katt_BOBROV_1900.bin
+    # kernel-nfs_vip1900
+
+    bootimage=${bootimage3}
+    nfs_kernel=${SOURCE_ROOT}/kernel-nfs_${model}
+else
+    echo "Could not find boot image. Tried ${bootimage3} and ${bootimage4}"
+    exit 1
+fi
+
+DEST_HOST=${TFTPHOST}
+DEST_ROOT=/tftpboot/${REMOTEUSER}/${model}
+
+echo "Uploading blobs for ${model} from ${SOURCE_ROOT} to ${DEST_HOST}:${DEST_ROOT}"
+# Make sure directories exist
+ssh  -l ${REMOTEUSER} ${DEST_HOST} "mkdir -p ${DEST_ROOT}; chmod go+rx ${DEST_ROOT}"
+
+# Complete boot images
+chmod go+r $bootimage
+scp -p $bootimage ${REMOTEUSER}@${DEST_HOST}:${DEST_ROOT}/boot-image
+
+# NFS kernels
+if [ -e ${nfs_kernel} ]; then
+    chmod go+r ${nfs_kernel}
+    scp -p ${nfs_kernel} ${REMOTEUSER}@${DEST_HOST}:${DEST_ROOT}/kernel-nfs
+else
+    echo "Could not find NFS kernel: ${nfs_kernel}."
+fi

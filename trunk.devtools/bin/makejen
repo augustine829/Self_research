@@ -1,0 +1,652 @@
+#!/usr/bin/env python2
+
+import fcntl
+import multiprocessing
+import os
+import re
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import termios
+import threading
+import time
+
+from datetime import timedelta
+from os.path import (
+    basename, dirname, exists, expanduser, expandvars, join, isdir, realpath)
+
+sys.path.insert(0, dirname(realpath(sys.argv[0])) + "/../3pp/pyinotify")
+import pyinotify
+
+debug_delay = 0
+
+
+def get_console_width():
+    (h, w, hp, wp) = struct.unpack(
+        "HHHH",
+        fcntl.ioctl(0, termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0)))
+    return w
+
+
+class Color:
+    BLACK = 0
+    RED = 1
+    GREEN = 2
+    YELLOW = 3
+    BLUE = 4
+    MAGENTA = 5
+    CYAN = 6
+    WHITE = 7
+
+
+class TermUI(object):
+    def echo_disable(self):
+        stdin_fd = sys.stdin.fileno()
+        attr = termios.tcgetattr(stdin_fd)
+        attr[3] = attr[3] & ~termios.ECHO
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, attr)
+
+    def echo_enable(self):
+        stdin_fd = sys.stdin.fileno()
+        attr = termios.tcgetattr(stdin_fd)
+        attr[3] = attr[3] | termios.ECHO
+        termios.tcsetattr(stdin_fd, termios.TCSADRAIN, attr)
+
+    def cursor_save_pos(self):
+        sys.stdout.write("\033[s")
+
+    def cursor_restore_pos(self):
+        sys.stdout.write("\033[u")
+
+    def cursor_down(self, n=1):
+        sys.stdout.write("\033[%dB" % n)
+#        self.flush()
+
+    def cursor_up(self, n=1):
+        sys.stdout.write("\033[%dA" % n)
+#        self.flush()
+
+    def cursor_left(self, n=1):
+        sys.stdout.write("\033[%dD" % n)
+
+    def cursor_right(self, n=1):
+        sys.stdout.write("\033[%dC" % n)
+
+    def cursor_home(self):
+        sys.stdout.write("\r")
+
+    def cursor_to_column(self, c):
+        sys.stdout.write("\033[%dG" % c)
+
+    def cursor_hide(self):
+        sys.stdout.write("\033[?25l")
+
+    def cursor_show(self):
+        sys.stdout.write("\033[?25h")
+
+    def erase_line(self):
+        sys.stdout.write("\033[2K")
+
+    def clear_line(self, chars):
+        for i in range(0, chars):
+            sys.stdout.write(" ")
+
+    def write(self, s, foreground=None, background=None, bold=False, repeat=1):
+        while repeat > 0:
+            if bold:
+                self._set_bold()
+            self._set_foreground(foreground)
+            self._set_background(background)
+            sys.stdout.write(s)
+            self._reset_foreground()
+            self._reset_background()
+            if bold:
+                self._reset_bold()
+            repeat -= 1
+
+    def flush(self):
+        sys.stdout.flush()
+
+    # Private helper functions
+
+    def _set_foreground(self, color):
+        if color:
+            sys.stdout.write("\033[%dm" % (30 + color))
+
+    def _set_background(self, color):
+        if color:
+            sys.stdout.write("\033[%dm" % (40 + color))
+
+    def _reset_foreground(self):
+        sys.stdout.write("\033[39m")
+
+    def _reset_background(self):
+        sys.stdout.write("\033[49m")
+
+    def _set_bold(self):
+        sys.stdout.write("\033[1m")
+
+    def _reset_bold(self):
+        sys.stdout.write("\033[22m")
+
+
+class BuildComponent(object):
+    # A component can be building (STATUS_OK),
+    # finished (STATUS_PENDING)
+    # or failed (STATUS_ERROR)
+    STATUS_OK = 1
+    STATUS_ERROR = 2
+    STATUS_PENDING = 3
+
+    def __init__(self, name, parent_list):
+        self._name = name
+        self._status = self.STATUS_OK
+        self._dirty = True
+        self._parent_list = parent_list
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def status(self):
+        return self._status
+
+    @name.setter
+    def name(self, value):
+        self._name = value
+        self._dirty = True
+        self._parent_list._update_list()
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+        self._dirty = True
+        self._parent_list._update_list()
+
+
+class BuildList(object):
+    def __init__(self):
+        self.current_height = 0
+        self.current_width = min(83, get_console_width()) - 4
+        self.vpadding = 6
+        self.hpadding = 4
+        self.ui = TermUI()
+        self.components = []
+        self.ui.cursor_hide()
+        self.ui.echo_disable()
+        self.start_time = time.time()
+        self.duration = 0
+        self.built_components = 0
+        self.total_components = 0
+        self.cached_components = 0
+        self.dirty = False
+        self.ui.cursor_save_pos()
+        self._do_run = True
+        self._update_event = threading.Event()
+        self._state_lock = threading.Lock()
+        self._update_thread = threading.Thread(target=self._update_list_thread)
+        self._update_thread.start()
+        time.sleep(debug_delay)
+
+    def get_component_count(self):
+        return sum(1 for i in self.components
+                   if i.status != BuildComponent.STATUS_PENDING)
+
+    def add_component(self, component):
+        component = BuildComponent(component, self)
+        self._state_lock.acquire()
+        self.components.append(component)
+        self._update_list()
+        self._state_lock.release()
+        return component
+
+    def remove_component(self, component):
+        # TODO: Remove, not used
+        self._state_lock.acquire()
+        self.components.remove(component)
+        self.built_components += 1
+        self.dirty = True
+        self._update_list()
+        self._state_lock.release()
+
+    def set_pending(self, component):
+        self._state_lock.acquire()
+        self.dirty = True
+        component.status = component.STATUS_PENDING
+        self.built_components += 1
+        self._state_lock.release()
+
+    def set_failed(self, component):
+        self._state_lock.acquire()
+        self.dirty = True
+        if component.status == component.STATUS_PENDING:
+            self.built_components -= 1
+        else:
+            self.built_components += 1
+        component.status = component.STATUS_ERROR
+        self._state_lock.release()
+
+    def update_start_time(self, start_time):
+        self._state_lock.acquire()
+        self.start_time = start_time
+        self._update_list()
+        self._state_lock.release()
+
+    def update_build_progress(self, built, total):
+        self._state_lock.acquire()
+        if built:
+            self.built_components = built
+        if total:
+            self.total_components = total
+        self._state_lock.release()
+        if built or total:
+            self._update_list()
+
+    def _update_list(self):
+        self._update_event.set()
+
+    def _update_list_internal(self):
+        self._state_lock.acquire()
+        self._prepare_lines()
+        time.sleep(debug_delay)
+        self._draw_status_line()
+        time.sleep(debug_delay)
+        self._draw_components()
+        time.sleep(debug_delay)
+        self._draw_footer()
+        time.sleep(debug_delay)
+        self.ui.cursor_save_pos()
+        self.ui.cursor_up(self.current_height + self.vpadding - 1)
+        self.ui.flush()
+        self._state_lock.release()
+
+    def _update_list_thread(self):
+        while self._do_run:
+            self._update_event.clear()
+            self.duration = time.time() - self.start_time
+            self._update_list_internal()
+            self._update_event.wait(1)
+
+    def _prepare_lines(self):
+        # Make room for all lines (if needed) to avoid \n flushes. And draw the
+        # rect at the same time.
+        newrequiredheight = self.current_height
+        if self.get_component_count() > newrequiredheight:
+            newrequiredheight = self.get_component_count()
+
+        if self.current_height != newrequiredheight \
+                or self.current_height == 0:
+            # Make room
+            self.dirty = True
+            self.current_height = newrequiredheight
+            # -1 because we already are positioned at the first line
+            self.ui.write("\n", repeat=self.current_height + self.vpadding - 1)
+            self.ui.cursor_up(self.current_height + self.vpadding - 1)
+
+            # Draw rect
+            self.ui.cursor_home()
+            self._draw_rectangle_char(u"\u250c")
+            self._draw_rectangle_char(
+                u"\u2500", self.current_width + self.hpadding - 2)
+            self._draw_rectangle_char(u"\u2510")
+            self.ui.write("\n")
+            # +3 = non-component rows inside the rect
+            for i in range(0, self.current_height + 3):
+                self.ui.erase_line()
+                self.ui.cursor_home()
+                self._draw_rectangle_char(u"\u2502")
+                self.ui.cursor_to_column(self.current_width + self.hpadding)
+                self._draw_rectangle_char(u"\u2502")
+                self.ui.write("\n")
+            self.ui.cursor_home()
+            self._draw_rectangle_char(u"\u2514")
+            self._draw_rectangle_char(
+                u"\u2500", self.current_width + self.hpadding - 2)
+            self._draw_rectangle_char(u"\u2518")
+            # -2 = up to the first row (same as when prepare_lines was called)
+            self.ui.cursor_up(self.current_height + self.vpadding - 2)
+        self.ui.cursor_down()
+        self.ui.cursor_to_column(3)
+
+    def _draw_rectangle_char(self, char, repeat=1):
+        if sys.stdout.encoding == "UTF-8":
+            char = char.encode("utf-8")
+        else:
+            char = "#"
+        self.ui.write(char, repeat=repeat)
+
+    def _draw_status_line(self):
+        self.ui.write("Ongoing:")
+        durationstr = "Time: %s" % timedelta(seconds=int(self.duration))
+        self.ui.cursor_to_column(
+            self.current_width - len(durationstr) + self.hpadding - 1)
+        self.ui.write(durationstr)
+        self.ui.cursor_down()
+
+    def _draw_components(self):
+        for component in self.components:
+            if component.status == component.STATUS_PENDING:
+                continue
+            if component._dirty or self.dirty:
+                self.ui.cursor_to_column(3)
+                self._draw_component(component)
+                component._dirty = False
+            self.ui.cursor_down()
+        # Clear the remaining lines
+        for i in range(0, self.current_height - self.get_component_count()):
+            self.ui.cursor_to_column(3)
+            self.ui.clear_line(self.current_width)
+            self.ui.cursor_down()
+        self.dirty = False
+
+    def _draw_component(self, component):
+        self.ui.clear_line(self.current_width)
+        self.ui.cursor_to_column(3)
+        color = None
+        if component.status == component.STATUS_ERROR:
+            color = Color.RED
+        if component.name:
+            component_name = component.name
+            if len(component.name) > self.current_width - 2:
+                component_name = component_name[:self.current_width - 4] + ".."
+            self.ui.write("- " + component_name, foreground=color, bold=True)
+
+    def _draw_footer(self):
+        self.ui.cursor_down()
+        self.ui.cursor_to_column(3)
+        if self.total_components > 0:
+            self.ui.write("%s of %s components done"
+                          % (self.built_components, self.total_components))
+            if self.cached_components > 0:
+                self.ui.write("   (%d from component cache)"
+                              % self.cached_components)
+        else:
+            self.ui.write("Calculating total components...")
+        self.ui.cursor_down(2)
+
+    def cleanup(self):
+        self._do_run = False
+        self._update_list()
+        self.ui.cursor_restore_pos()
+        self.ui.cursor_show()
+        self.ui.echo_enable()
+        self.ui.write("\n\n")
+
+
+class BsgBuilderWatcher(pyinotify.ProcessEvent):
+    def __init__(self, builder):
+        self.builder = builder
+        self.active_components = {}
+        self.reload_requires = False
+
+    def process_IN_CREATE(self, event):
+        if event.name == "makeended":
+            self.builder.notifierFinished.set()
+            return
+        if event.name == ".requires":
+            self.reload_requires = True
+            return
+        component_name = self._get_component_name(event.name)
+        if component_name:
+            component = self.builder.build_list.add_component(component_name)
+            component.logfile = event.path + "/" + event.name
+            self.active_components[component_name] = component
+
+    def process_IN_MODIFY(self, event):
+        if event.name == ".requires":
+            self.reload_requires = True
+
+    def process_IN_MOVED_TO(self, event):
+        if event.name == ".requires":
+            self.reload_requires = True
+
+    def process_IN_CLOSE_NOWRITE(self, event):
+        if event.name == ".requires" and self.reload_requires:
+            self.builder.parse_requires(event.path + "/" + event.name)
+            self.reload_requires = False
+
+    def process_IN_CLOSE_WRITE(self, event):
+        if event.name == ".requires" and self.reload_requires:
+            self.builder.parse_requires(event.path + "/" + event.name)
+            self.reload_requires = False
+            return
+        # Note: There are two ways we can detect that a component has finished:
+        # either we see the close on the components result file first, or/and
+        # we see a modification to .failed_components including the component.
+        if event.name == ".failed_components":
+            for line in open(self.builder.failed_components):
+                component_name = line.rstrip()
+                if component_name in self.active_components:
+                    component = self.active_components[component_name]
+                    self.builder.build_list.set_failed(component)
+            return
+        component_name = self._get_component_name(event.name)
+        if component_name:
+            # If this is the root make log closing (also used for
+            # local_component) and a required component fails, we have not yet
+            # added the local component to self.active_components
+            if component_name not in self.active_components:
+                return
+            local_component = self.builder.local_component
+            build_list = self.builder.build_list
+            component = self.active_components[component_name]
+
+            # Mark component as ok, pending (increasing build count).
+            # If it failed we will discover this later, and then change
+            # its status to error and decrease the built count
+            if component.status == component.STATUS_OK:
+                build_list.set_pending(component)
+
+            # Check if component was fetched from component cache
+            if "Found cached component" in open(component.logfile).read():
+                build_list.cached_components += 1
+
+            last_required = (
+                len(self.active_components) == build_list.total_components - 1)
+            if local_component and last_required:
+                component = build_list.add_component(local_component)
+                component.logfile = "%s/result_%s.txt" % (
+                    event.path,
+                    local_component.replace("_", "__").replace("/", "_"))
+                self.active_components[local_component] = component
+
+    def _get_component_name(self, filename):
+        if filename.startswith("result_"):
+            component = filename.replace("_", "/").replace("//", "_")
+            component = re.sub(r"^result/", "", component)
+            component = re.sub(r"\.txt$", "", component)
+            return component
+        return None
+
+
+class BsgBuilder(object):
+    def __init__(self):
+        self.build_list = None  # Created in start()
+        self.failed_components = None  # Set in start()
+        self.requirements = {}
+        self.builddir = ""
+        self.local_component = None
+        self.notifier = None
+        signal.signal(signal.SIGINT, self.interrupted)
+
+    def interrupted(self, a, b):
+        self.end()
+        sys.exit(0)
+
+    def start(self, cores, arguments):
+        self.builddir = self.get_build_dir(arguments)
+        builddir = self.builddir
+        self.failed_components = join(self.builddir, ".failed_components")
+
+        if not isdir(builddir):
+            sys.stderr.write("Error: %s does not exist\n" % builddir)
+            return 1
+
+        try:
+            bsg_src = self.get_bsg_src(builddir)
+        except Exception as e:
+            sys.stderr.write(
+                "Error: makejen only works in source trees that use"
+                " makesystem, but it seems like this source tree doesn't:\n"
+                "%s\n" % e)
+            return 1
+
+        self.build_list = BuildList()
+
+        logdir = self.create_log_dir()
+
+        # Create log file for root make process
+        rel_component_name = builddir.replace(bsg_src, "")[1:]
+        self.local_component = rel_component_name
+        root_log_file = logdir + "/rootmakelog.txt"
+        if rel_component_name:
+            root_log_file = "%s/result_%s.txt" % (
+                logdir,
+                rel_component_name.replace("_", "__").replace("/", "_"))
+
+        # Create the log file before notifier starts
+        open(root_log_file, "w").close()
+
+        # Remove old .failed_components
+        if exists(self.failed_components):
+            os.remove(self.failed_components)
+
+        # Watch log dir and .requires
+        self.watcher = BsgBuilderWatcher(self)
+        self.watch_manager = pyinotify.WatchManager()
+        self.notifier = pyinotify.ThreadedNotifier(self.watch_manager,
+                                                   self.watcher)
+        self.notifierFinished = threading.Event()
+
+        mask = pyinotify.IN_CREATE | pyinotify.IN_CLOSE_WRITE
+        self.watch_manager.add_watch(logdir, mask, rec=True)
+
+        mask = pyinotify.ALL_EVENTS
+        self.watch_manager.add_watch(builddir, mask, rec=False)
+
+        # Build
+        command = ["make"] + arguments
+        if not any(x.startswith("-j") for x in arguments):
+            command += ["-j", str(cores)]
+
+        # Try parsing .requires if present
+        self.parse_requires(builddir + "/.requires")
+
+        self.notifier.start()
+        return_code = 0
+        root_log = open(root_log_file, "w")
+        return_code = subprocess.call(
+            command, stdout=root_log, stderr=root_log)
+        root_log.close()
+
+        # Treat an error from root make as the local_component failed, if any
+        if self.local_component and return_code != 0:
+            with open(self.failed_components, "a") as fp:
+                fp.write(self.local_component + "\n")
+
+        # Notify that make has ended and wait for notifier to process all its
+        # events
+        time.sleep(1)
+        open(logdir + "/makeended", "a").close()
+        self.notifierFinished.wait()
+        self.end()
+
+        # Print result
+        if return_code != 0:
+            for line in open(root_log_file):
+                if re.match(r"^(===\s|(Entering|Leaving) directory)", line):
+                    continue
+                print line.rstrip()
+            print
+
+        # Copy failed components' logs to failed dir and print paths to failed
+        # logs
+        if return_code != 0 and self.watcher.active_components:
+            print "Logs of failed components:"
+            failed_logs_dir = logdir + "/failed"
+            if not exists(failed_logs_dir):
+                os.makedirs(failed_logs_dir)
+            for component_name in sorted(self.watcher.active_components):
+                component = self.watcher.active_components[component_name]
+                if component.status == component.STATUS_ERROR:
+                    dst = failed_logs_dir + "/" + basename(component.logfile)
+                    os.symlink(component.logfile, dst)
+                    nice_dst = dst[len(os.getcwd()) + 1:]
+                    print " - " + nice_dst
+            print
+
+        return return_code
+
+    def end(self):
+        if self.notifier:
+            self.notifier.stop()
+        self.build_list.cleanup()
+
+    def get_build_dir(self, arguments):
+        builddir = "."
+        if "-C" in arguments and arguments[-1] != "-C":
+            builddir = arguments[arguments.index("-C") + 1]
+        builddir = expanduser(builddir)
+        builddir = expandvars(builddir)
+        builddir = realpath(builddir)
+        return builddir
+
+    def create_log_dir(self):
+        logdir = realpath(".buildlog")
+        os.environ["DAILY_LOG_DIR"] = logdir  # SVN
+        os.environ["AUTOBUILD_LOGS_DIR"] = logdir  # Git
+        if exists(logdir):
+            shutil.rmtree(logdir)
+        os.makedirs(logdir)
+        return logdir
+
+    def get_bsg_src(self, builddir):
+        command = ["make", "--no-print-directory", "-s", "-C", builddir,
+                   "getvar-BSG_SRC_ABS"]
+        try:
+            p = subprocess.Popen(command,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+            (stdout, _) = p.communicate()
+            if p.returncode != 0:
+                raise Exception("'%s' failed with exit code %d"
+                                % (" ".join(command), p.returncode))
+        except subprocess.CalledProcessError as e:
+            raise Exception(e.output)
+        return stdout.rstrip("\n")
+
+    def parse_requires(self, requiresfile):
+        # Parse the requires file in builddir and update the
+        # requirement dependencies representation
+        try:
+            with open(requiresfile) as fp:
+                content = fp.readlines()
+                requires_root = None
+                for line in content:
+                    m1 = re.match(r"(?P<comp>[^:]+)(:| =) (?P<reqs>.*)", line)
+                    if m1:
+                        reqs = m1.group("reqs").split()
+                        self.requirements[m1.group("comp")] = reqs
+                    m2 = re.match(r"# ROOT=(?P<root>.*)", line)
+                    if m2:
+                        requires_root = m2.group("root")
+                if "TREEDIRS" in self.requirements:
+                    total = len(self.requirements["TREEDIRS"])
+                    if requires_root not in [".", "all"]:
+                        total += 1
+                    self.build_list.update_build_progress(None, total + 1)
+        except:
+            return
+
+
+def main():
+    builder = BsgBuilder()
+    cores = multiprocessing.cpu_count()
+    return_code = builder.start(cores=cores, arguments=sys.argv[1:])
+    sys.exit(return_code)
+
+
+main()

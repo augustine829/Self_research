@@ -1,0 +1,33 @@
+#!/bin/sh
+
+topdir=$(make getvar-BSG_SRC_ABS)
+pyflakes=$(make getvar-PYTHON_TOOLCHAIN_PATH)/bin/pyflakes
+pep8=$(make getvar-PYTHON_TOOLCHAIN_PATH)/bin/pep8
+
+all_files=$(mktemp)
+python_files=$(mktemp)
+warnings=$(mktemp)
+trap "rm -f $all_files $python_files $warnings" EXIT
+
+cd $topdir
+svn status --ignore-externals -v \
+    | awk '{print $NF}' \
+    | while read path; do [ -f "$path" -a ! -L "$path" ] && echo "$path"; done \
+    | grep -v '^3pp/' \
+    >$all_files
+
+xargs -r grep -EnH '^#!.*python' <$all_files \
+    | sed -rn 's/^([^:]*):1:.*/\1/p' \
+    >$python_files
+grep '\.py$' $all_files >>$python_files
+sort -u $python_files -o $python_files
+
+xargs -r $pyflakes <$python_files >$warnings
+xargs -r $pep8 --ignore=E302 <$python_files >>$warnings
+sed 's/^/check_python: warning: /' $warnings
+
+if [ -s $warnings ]; then
+    exit 1
+else
+    exit 0
+fi

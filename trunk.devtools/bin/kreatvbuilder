@@ -1,0 +1,584 @@
+#!/usr/bin/python
+
+""" This script can build and "install" KreaTV on your STBs.
+
+When first running this script in a KreaTV code tree it will:
+* Ask which build configuration you'd like to use.
+* Ask which TARGETs you'd like to build for.
+* Ask which TFTP server you're booting your STBs from.
+* Ask which NFS server you're using for NFS root file systems.
+* Ask if you want to use boot image or NFS root disk.
+* Determine a suitable build parallelism depending on the number of
+  CPUs in the system.
+* Build KreaTV.
+* Copy boot image/NFS kernel to TFTP server (and possibly copy root
+  disk to NFS server).
+
+Build configuration is stored in the KreaTV tree and some "global"
+settings (TFTP/NFS) are stored in $HOME. When re-running the script it
+will pick up any previous configuration and re-use it.
+"""
+
+import os
+import re
+import ConfigParser
+import subprocess
+import sys
+import glob
+import optparse
+import fnmatch
+
+APPLICATION_NAME = os.path.basename(sys.argv[0])
+
+
+class ApplicationConfigurationBase:
+    CONFIGURATION_FILE = os.path.expanduser(
+        "~/.%s.cfg" % APPLICATION_NAME)
+    CONFIGURATION_SECTION = None
+    CONFIGURATION_ITEMS = None
+
+    def __init__(self, force_reconfiguration):
+        self._configuration = ConfigParser.SafeConfigParser()
+        self._configuration.read(self.CONFIGURATION_FILE)
+
+        if not self._configuration.has_section(self.CONFIGURATION_SECTION):
+            self._configuration.add_section(self.CONFIGURATION_SECTION)
+
+        current_items = self._configuration.options(self.CONFIGURATION_SECTION)
+        for (item_name,
+             item_description,
+             item_choices,
+             item_default) in self.CONFIGURATION_ITEMS:
+            if item_name in current_items:
+                item_default = self._configuration.get(
+                    self.CONFIGURATION_SECTION, item_name, raw=True)
+
+            if force_reconfiguration or item_name not in current_items:
+                if item_choices:
+                    item_value = self._get_user_choice(
+                        "Choose %s:" % item_description,
+                        item_choices, item_default)
+                else:
+                    item_value = self._get_user_input(
+                        "Input %s:" % item_description, item_default)
+
+                self._configuration.set(self.CONFIGURATION_SECTION,
+                                        item_name, item_value)
+        self.write()
+
+    def get_option(self, option_name, variables={}):
+        variables["core_id"] = os.environ["USER"]
+        return self._configuration.get(self.CONFIGURATION_SECTION, option_name,
+                                       vars=variables)
+
+    def write(self):
+        config_file = open(self.CONFIGURATION_FILE, "w")
+        self._configuration.write(config_file)
+        config_file.close()
+
+    def _get_user_input(self, prompt, default):
+        if default:
+            prompt = "%s [%s]" % (prompt, default)
+        user_input = raw_input("%s " % prompt).strip()
+        if not user_input and default:
+            return default
+
+        return user_input
+
+    def _get_user_choice(self, prompt, choices, default):
+        for i in range(len(choices)):
+            print("%d: %s" % (i + 1, choices[i]))
+
+        if default in choices:
+            default = str(choices.index(default) + 1)
+        else:
+            default = None
+
+        while True:
+            user_input = self._get_user_input(prompt, default)
+            if (user_input.isdigit()
+                    and int(user_input) - 1 in range(len(choices))):
+                return choices[int(user_input) - 1]
+
+    def _get_user_yes_no(self, prompt, default=None):
+        assert(default in [None, "y", "n"])
+        while True:
+            user_input = self._get_user_input(prompt, default)
+            if user_input.lower() in ["y", "yes"]:
+                return "y"
+            if user_input.lower() in ["n", "no"]:
+                return "n"
+
+
+class KreaTvBuilderConfiguration(ApplicationConfigurationBase):
+    CONFIGURATION_SECTION = "main"
+    CONFIGURATION_ITEMS = [
+        ("build_command",
+         "build command",
+         ["make", "makejen"],
+         "make")
+    ]
+
+
+class TftpServerConfiguration(ApplicationConfigurationBase):
+    CONFIGURATION_SECTION = "tftp"
+    CONFIGURATION_ITEMS = [
+        ("server_address",
+         "TFTP server's IP address or host name",
+         None,
+         "localhost"),
+        ("server_root_path",
+         "TFTP server's root directory",
+         None,
+         "/var/lib/tftpboot"),
+        ("stb_boot_file_name",
+         "file used by STB to boot",
+         None,
+         "%(stb_model)s")
+    ]
+
+
+class NfsServerConfiguration(ApplicationConfigurationBase):
+    CONFIGURATION_SECTION = "nfs"
+    CONFIGURATION_ITEMS = [
+        ("server_address",
+         "NFS server's IP address or host name",
+         None,
+         "localhost"),
+        ("server_root_path",
+         "NFS server's root directory",
+         None,
+         "/extra/nfs_filesystems/%(core_id)s")
+    ]
+
+
+class KreaTvTreeConfiguration(ApplicationConfigurationBase):
+    CONFIGURATION_FILE = None
+    CONFIGURATION_SECTION = "tree"
+    CONFIGURATION_ITEMS = None
+    PRODUCT_FILES_OPTION = "product_files"
+
+    def __init__(self, kreatv_tree, force_reconfiguration):
+        self._platforms_mk_path = \
+            "%s/makesystem/platforms.mk" % kreatv_tree.get_root_path()
+
+        self._configure_platforms_mk(force_reconfiguration)
+
+        self.CONFIGURATION_FILE = "%s/.%s.cfg" % (kreatv_tree.get_root_path(),
+                                                  APPLICATION_NAME)
+        self.CONFIGURATION_ITEMS = [
+            ("build_parallelism",
+             "build parallelism",
+             None,
+             str(self._get_num_cpu_cores() * 2))
+        ]
+
+        self.CONFIGURATION_ITEMS += [
+            ("build_configuration",
+             "build configuration",
+             self._get_available_build_configurations(kreatv_tree),
+             "katt/default"),
+            ("boot_method",
+             "boot method",
+             ["NFS", "Boot image"],
+             None)
+        ]
+
+        ApplicationConfigurationBase.__init__(self, force_reconfiguration)
+
+        # TODO: If build configuration changes, forget product files
+        # to avoid installing boot image/root disk from a previous
+        # build configuration (if user skips build and goes directly
+        # to install).
+
+    def _get_available_build_configurations(self, kreatv_tree):
+        def get_leaf_directories_with_makefile(root_directory):
+            root_directory_items = os.listdir(root_directory)
+            dirs = [x for x in root_directory_items if os.path.isdir(
+                os.path.join(root_directory, x))]
+            files = [x for x in root_directory_items if os.path.isfile(
+                os.path.join(root_directory, x))]
+
+            leaf_dirs = []
+            # Don't descend into directories named after targets
+            if not set(dirs) & set(self.get_all_targets()):
+                for dir in dirs:
+                    dir_path = os.path.join(root_directory, dir)
+                    leaf_dirs.extend(
+                        get_leaf_directories_with_makefile(dir_path))
+
+            if len(leaf_dirs) == 0 and "Makefile" in files:
+                leaf_dirs.append(root_directory)
+
+            return leaf_dirs
+
+        boot_image_root_path = (kreatv_tree.get_root_path() +
+                                "/products/ip-stb/boot_image")
+        build_directories = get_leaf_directories_with_makefile(
+            boot_image_root_path)
+
+        build_configurations = []
+        for directory in build_directories:
+            assert directory.startswith(boot_image_root_path + "/")
+            build_configurations.append(
+                directory[len(boot_image_root_path + "/"):])
+
+        if not build_configurations:
+            raise Exception("No build configuration found in %s" %
+                            kreatv_tree.get_root_path())
+
+        return sorted(build_configurations)
+
+    def get_all_targets(self):
+        all_targets = []
+        for line in open(self._platforms_mk_path, "r").readlines():
+            m = re.match("BUILD_(\w+)\s=\s", line, re.IGNORECASE)
+            if m:
+                all_targets.append(m.group(1).lower())
+
+        return all_targets
+
+    def get_enabled_targets(self):
+        enabled_targets = []
+        for line in open(self._platforms_mk_path, "r").readlines():
+            m = re.match("BUILD_(\w+)\s=\strue", line, re.IGNORECASE)
+            if m:
+                enabled_targets.append(m.group(1).lower())
+
+        return enabled_targets
+
+    def get_enabled_stb_targets(self):
+        non_stb_targets = ["test", "stb_host"]
+        return list(set(self.get_enabled_targets()) - set(non_stb_targets))
+
+    def get_product_files(self):
+        product_files = self.get_option(self.PRODUCT_FILES_OPTION)
+        if product_files is None:
+            return []
+        return [pf.strip() for pf in product_files.split(",")]
+
+    def set_product_files(self, product_files):
+        self._configuration.set(self.CONFIGURATION_SECTION,
+                                self.PRODUCT_FILES_OPTION,
+                                ", ".join(product_files))
+        self.write()
+
+    def _configure_platforms_mk(self, force_reconfiguration):
+        existing_configuration = []
+        if os.path.isfile(self._platforms_mk_path):
+            if not force_reconfiguration:
+                return
+
+            existing_configuration = self.get_enabled_targets()
+
+        make_command = "make -C %s %s" % \
+            (os.path.dirname(self._platforms_mk_path),
+             os.path.basename(self._platforms_mk_path))
+        p = subprocess.Popen(make_command.split())
+        p.communicate()
+        if p.returncode != 0:
+            raise Exception("Building platforms.mk failed")
+
+        new_platforms_mk = ""
+        for line in open(self._platforms_mk_path, "r").readlines():
+            m = re.match("BUILD_(\w+)", line)
+
+            if m:
+                target = m.group(1)
+
+                if target.lower() in existing_configuration:
+                    default_choice = "y"
+                else:
+                    default_choice = "n"
+
+                if self._get_user_yes_no("Build %s?" % target,
+                                         default_choice) == "y":
+                    new_platforms_mk += "%s = true\n" % m.group(0)
+                else:
+                    new_platforms_mk += "%s = false\n" % m.group(0)
+            else:
+                new_platforms_mk += line
+
+        f = open(self._platforms_mk_path, "w")
+        f.write(new_platforms_mk)
+        f.close()
+
+    def _get_num_cpu_cores(self):
+        current_cpu = None
+        cores_per_cpu = {}
+        for line in open("/proc/cpuinfo").readlines():
+            m = re.search("physical id\s:\s(\d+)", line)
+            if m:
+                current_cpu = int(m.group(1))
+
+            m = re.search("cpu cores\s:\s(\d+)", line)
+            if m:
+                assert current_cpu is not None
+                num_cpu_cores = int(m.group(1))
+                cores_per_cpu[current_cpu] = num_cpu_cores
+
+        num_total_cpu_cores = 0
+        for num_cores in cores_per_cpu.itervalues():
+            num_total_cpu_cores += num_cores
+
+        assert(num_total_cpu_cores > 0)
+        return num_total_cpu_cores
+
+
+class KreaTvTree:
+    BOOT_IMAGE_FILE_NAME_PATTERN = "kreatv-bi-*.bin"
+    NFS_KERNEL_FILE_NAME_PATTERN = "kreatv-kernel-nfs-*"
+    NFS_ROOT_DISK_FILE_NAME_PATTERN = "kreatv-rootdisk-*"
+
+    def __init__(self, directory, main_configuration, force_reconfiguration):
+        self._root_path = None
+        while os.system("svn info " + directory + " >/dev/null 2>&1") == 0:
+            self._root_path = directory
+            directory = os.path.realpath(directory + "/..")
+
+        if self._root_path is None:
+            raise Exception("Current directory is not part of SVN tree")
+
+        self._main_configuration = main_configuration
+        self._configuration = KreaTvTreeConfiguration(
+            self, force_reconfiguration)
+
+    def get_root_path(self):
+        return self._root_path
+
+    def build(self):
+        print "Building."
+        print "Configuration: %s" % self._configuration.get_option(
+            "build_configuration")
+        print "Targets: %s" % ", ".join(
+            self._configuration.get_enabled_targets())
+        print
+        print
+
+        makeCommand = "%s -j %s -C %s/products/ip-stb/boot_image/%s" % (
+            self._main_configuration.get_option("build_command"),
+            self._configuration.get_option("build_parallelism"),
+            self._root_path,
+            self._configuration.get_option("build_configuration"))
+
+        p = subprocess.Popen(makeCommand.split())
+        p.communicate()
+        if p.returncode != 0:
+            sys.exit("Building boot image failed")
+        self._remember_produced_product_files()
+
+    def get_boot_image_files(self):
+        boot_method = self._configuration.get_option("boot_method")
+        product_files = self._configuration.get_product_files()
+
+        boot_image_files = {}
+        for stb_target in self._configuration.get_enabled_stb_targets():
+            if boot_method == "NFS":
+                file_name_pattern = self.NFS_KERNEL_FILE_NAME_PATTERN
+            else:
+                file_name_pattern = self.BOOT_IMAGE_FILE_NAME_PATTERN
+
+            for product_file in product_files:
+                file_name = os.path.basename(product_file)
+                if (fnmatch.fnmatch(file_name, file_name_pattern)
+                        and stb_target in file_name):
+                    boot_image_files[stb_target] = product_file
+                    break
+            if stb_target not in boot_image_files:
+                exit("Failed to find boot image for %s. Candidates: %s" %
+                     (stb_target, str(product_files)))
+
+        return boot_image_files
+
+    def get_root_disk_files(self):
+        if self._configuration.get_option("boot_method") != "NFS":
+            return None
+
+        product_files = self._configuration.get_product_files()
+
+        root_disk_files = {}
+        for stb_target in self._configuration.get_enabled_stb_targets():
+            for product_file in product_files:
+                file_name = os.path.basename(product_file)
+                if (fnmatch.fnmatch(file_name,
+                                    self.NFS_ROOT_DISK_FILE_NAME_PATTERN)
+                        and stb_target in file_name):
+                    root_disk_files[stb_target] = product_file
+                    break
+            if stb_target not in root_disk_files:
+                exit("Failed to find root disk for %s. Candidates: %s" %
+                     (stb_target, str(product_files)))
+
+        return root_disk_files
+
+    def _remember_produced_product_files(self):
+        stb_targets = self._configuration.get_enabled_stb_targets()
+        product_directory = "%s/dist/products" % self._root_path
+        product_file_patterns = [self.BOOT_IMAGE_FILE_NAME_PATTERN,
+                                 self.NFS_KERNEL_FILE_NAME_PATTERN,
+                                 self.NFS_ROOT_DISK_FILE_NAME_PATTERN]
+
+        all_product_files = []
+        for product_file_pattern in product_file_patterns:
+            glob_pattern = "%s/%s" % (product_directory, product_file_pattern)
+            product_files = glob.glob(glob_pattern)
+            if len(product_files) < len(stb_targets):
+                print "WARNING: Could not find %d file%s (%s) matching %s" % (
+                    len(stb_targets), "" if len(stb_targets) == 1 else "s",
+                    ", ".join(stb_targets), glob_pattern)
+                continue
+
+            # Sort files on creation time
+            product_files.sort(cmp=lambda x, y: cmp(
+                os.stat(x).st_ctime, os.stat(y).st_ctime))
+
+            # Only keep the len(stb_target) most recent files since
+            # these should be the ones produced by this build.
+            product_files = product_files[-len(stb_targets):]
+
+            # We could check the file names for sanity here. Ie check
+            # that each file is built for a separate target and that
+            # they all have similar name (same product target), but
+            # I'm not in the mood for writing such checks and it
+            # "shouldn't happen"..
+
+            all_product_files.extend(product_files)
+
+        self._configuration.set_product_files(all_product_files)
+
+
+class SshClient:
+    def __init__(self, server_address):
+        self.server_address = server_address
+
+    def run_command(self, command):
+        assert("|" not in command)
+        p = subprocess.Popen(["ssh", "-X", "root@%s" % self.server_address] +
+                             command.split())
+        p.communicate()
+        if p.returncode != 0:
+            exit("Shell command failed: %s" % command)
+
+    def copy(self, local_path, remote_path):
+        p = subprocess.Popen(["scp", "-rq", local_path, "root@%s:%s" % (
+            self.server_address, remote_path)])
+        p.communicate()
+        if p.returncode != 0:
+            exit("Secure copy failed: %s -> %s" % (local_path, remote_path))
+
+
+class TftpServer:
+    def __init__(self, force_reconfiguration):
+        self._configuration = TftpServerConfiguration(force_reconfiguration)
+
+    def upload_boot_image(self, stb_target, boot_image):
+        server_address = self._configuration.get_option("server_address")
+        server_root_path = self._configuration.get_option("server_root_path")
+        stb_boot_file_name = self._configuration.get_option(
+            "stb_boot_file_name", {"stb_model": stb_target})
+
+        ssh_client = SshClient(server_address)
+        print "Writing boot image %s to %s:%s" % (
+            os.path.basename(boot_image), server_address, server_root_path)
+        ssh_client.copy(boot_image, server_root_path)
+
+        print "Creating boot image link %s:%s/%s" % (
+            server_address, server_root_path, stb_boot_file_name)
+        ssh_client.run_command("ln -sf %s %s/%s" %
+                               (os.path.basename(boot_image),
+                                server_root_path, stb_boot_file_name))
+
+
+class NfsServer:
+    def __init__(self, force_reconfiguration):
+        self._configuration = NfsServerConfiguration(force_reconfiguration)
+
+    def unpack_root_disk(self, stb_target, root_disk_file):
+        server_address = self._configuration.get_option("server_address")
+        server_root_path = self._configuration.get_option("server_root_path")
+        server_stb_target_path = server_root_path + "/" + stb_target
+
+        print "Expanding root disk to %s:%s" % (server_address,
+                                                server_stb_target_path)
+        assert(len(server_stb_target_path) > 10)
+        ssh_client = SshClient(server_address)
+        ssh_client.run_command("rm -rf %s" % server_stb_target_path)
+        ssh_client.run_command("mkdir -p %s" % server_stb_target_path)
+
+        assert(root_disk_file.endswith(".tgz"))
+        p1 = subprocess.Popen(["cat", root_disk_file], stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(["ssh", "root@%s" % server_address,
+                               "tar", "-C", server_stb_target_path,
+                               "-xzpPf", "-"], stdin=p1.stdout)
+        p2.communicate()
+        p1.stdout.close()
+        if p2.returncode != 0:
+            exit("Failed to unpack root disk")
+
+        print "Copying debug symbols to root disk"
+        ssh_client.run_command("mkdir -p %s" % (server_stb_target_path +
+                                                "/rootdisk/usr/local/lib"))
+        p1 = subprocess.Popen(["cat", root_disk_file.replace(
+            "-rootdisk-", "-debug-")], stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(["ssh", "root@%s" % server_address,
+                               "tar", "-C", server_stb_target_path +
+                               "/rootdisk/usr/local/lib",
+                               "-xzpPf", "-"], stdin=p1.stdout)
+        p2.communicate()
+        p1.stdout.close()
+        if p2.returncode != 0:
+            exit("Failed to unpack debug symbols to root disk")
+
+def parse_command_line_options():
+    parser = optparse.OptionParser(usage="Usage: %prog [options]")
+    parser.add_option("-c", "--configure",
+                      action="store_true", dest="configure",
+                      help="Reconfigure %s" % APPLICATION_NAME)
+    parser.add_option("-b", "--build",
+                      action="store_true", dest="build_only",
+                      help="Only build tree")
+    parser.add_option("-i", "--install",
+                      action="store_true", dest="install_only",
+                      help="Only install what's already built")
+
+    (options, args) = parser.parse_args()
+
+    if options.install_only:
+        options.configure = False
+
+    return options
+
+
+def build_kreatv_for_stb(kreatv_tree, options):
+    if options.install_only or not options.build_only:
+        tftp_server = TftpServer(options.configure)
+        nfs_server = NfsServer(options.configure)
+
+    if not options.install_only:
+        kreatv_tree.build()
+        if options.build_only:
+            return
+
+    root_disk_files = kreatv_tree.get_root_disk_files()
+    for stb_target, boot_image in (kreatv_tree.get_boot_image_files().
+                                   iteritems()):
+        root_disk_file = None
+        if root_disk_files is not None:
+            root_disk_file = root_disk_files[stb_target]
+
+        tftp_server.upload_boot_image(stb_target, boot_image)
+        if root_disk_file is not None:
+            nfs_server.unpack_root_disk(stb_target, root_disk_file)
+
+
+def main():
+    options = parse_command_line_options()
+    main_configuration = KreaTvBuilderConfiguration(options.configure)
+    kreatv_tree = KreaTvTree(os.getcwd(), main_configuration,
+                             options.configure)
+
+    build_kreatv_for_stb(kreatv_tree, options)
+
+
+if __name__ == "__main__":
+    main()

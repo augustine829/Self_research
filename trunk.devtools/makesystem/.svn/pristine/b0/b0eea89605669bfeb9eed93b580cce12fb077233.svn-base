@@ -1,0 +1,7 @@
+
+# $(TARGET_NAME_TEST)
+ifeq ($(TOOLCHAIN), $(HOST_TOOLCHAIN_NAME))
+  ifeq ($(filter $(TARGET_NAME_TEST), $(COMPONENT_TARGETS)) $(strip $(BUILD_TEST)), $(TARGET_NAME_TEST) true)
+    _auto_ldflags += -lmocks_a_aa
+  endif
+endif

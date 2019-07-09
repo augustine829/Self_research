@@ -1,0 +1,24 @@
+#!/bin/bash
+
+m()
+{
+  mk local_all
+}
+
+mm()
+{
+  mk --filter tree_all && m
+}
+
+mmm()
+{
+  local oldcwd="$(pwd)"
+  local mmm_dir="$MMM_DIR"
+
+  [ -z "$mmm_dir" ] && mmm_dir=products/ip-stb/boot_image/custom
+  echo Building "$mmm_dir"
+  rcd "$mmm_dir" && mm
+  local ret=$?
+  cd "$oldcwd"
+  return $ret
+}

@@ -1,0 +1,1 @@
+#define WORK_MINUTES_PER_DAY 450

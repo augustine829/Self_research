@@ -1,0 +1,91 @@
+#! /bin/sh
+
+set -eu
+
+error() {
+    echo "$(basename $0): error: $*"
+    exit 1
+}
+
+usage() {
+cat <<EOF
+Usage: $(basename $0) [options]
+
+Options:
+    -h, --help     Display this help and exit.
+    -v, --verbose  Verbose mode.
+
+Creates or updates a GTAGS (GNU Global) database from C and C++ files
+in an SVN working copy.
+
+Current directory is expected to be part of an SVN working copy and
+the GTAGS database will be created from the top directory of the
+SVN working copy. Files unknown to SVN are ignored.
+
+To include non-SVN directories in the index, list them in
+~/.gtags-update-dirs. The directories can be absolute or relative to
+the root.
+EOF
+}
+
+cd_to_top_dir() {
+    if git_top=$(git rev-parse --show-toplevel 2>/dev/null); then
+        cd $git_top
+    else
+        while svn info .. >/dev/null 2>&1; do
+            cd ..
+        done
+        test -d .svn
+    fi
+}
+
+verbose=
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+
+        -v|--verbose)
+            verbose=-v
+            ;;
+
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+
+    shift
+done
+
+if ! which gtags >/dev/null 2>&1; then
+    error "Could not find the gtags command; have you installed GNU Global?"
+fi
+
+if ! cd_to_top_dir; then
+    error "Current directory is not part of a Git or SVN source tree"
+fi
+
+tmpfile=$(mktemp)
+trap "rm -f $tmpfile" EXIT
+
+configs="$HOME/.gtags-update-dirs .gtags-update-dirs"
+for config in $configs; do
+    if [ -e $config ]; then
+        for path in $(cat $config); do
+            if [ -d $path ]; then
+                find $path -name ".git" -prune -o -name ".svn" -prune -o -type f >>$tmpfile
+            fi
+        done
+    fi
+done
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git ls-files >>$tmpfile
+else
+    svn status --verbose | perl -lane '$_ = pop(@F); print if -f' >>$tmpfile
+fi
+
+gtags -i $verbose -f $tmpfile

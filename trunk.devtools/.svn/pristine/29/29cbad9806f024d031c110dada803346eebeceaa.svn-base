@@ -1,0 +1,5 @@
+eclipse.preferences.version=1
+formatter_profile=_KreaTV
+formatter_settings_version=1
+org.eclipse.cdt.ui.text.custom_code_templates=<?xml version\="1.0" encoding\="UTF-8" standalone\="no"?><templates><template autoinsert\="false" context\="org.eclipse.cdt.ui.text.codetemplates.filecomment_context" deleted\="false" description\="Comment for created C/C++ files" enabled\="true" id\="org.eclipse.cdt.ui.text.codetemplates.filecomment" name\="filecomment">/* -*- mode\: C++; tab-width\: 2; indent-tabs-mode\: nil; c-basic-offset\:2 -*-\n *--------------------------------------------------------------------\n *\n * ${file_name}\n * \n * \n * Copyright (c) ${year} Motorola, Inc. All rights reserved.\n *\n *--------------------------------------------------------------------\n */\n</template></templates>
+

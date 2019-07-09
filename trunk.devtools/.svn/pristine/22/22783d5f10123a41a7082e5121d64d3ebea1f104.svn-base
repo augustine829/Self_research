@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -eu
+
+. $(dirname $0)/common.sh
+
+read username
+read password
+# The commandline arguments are arguments to "svn diff".
+
+svn diff --no-auth-cache --username "$username" --password "$password" "$@"

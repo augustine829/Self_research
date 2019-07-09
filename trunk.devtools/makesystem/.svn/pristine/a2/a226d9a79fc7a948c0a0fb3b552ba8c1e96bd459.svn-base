@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2013-2015 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+#
+# The purpose of this script is to install license files into the build folder
+# of an IIP. The files copied are 3PPLICENSE* and KTVLICENSE* files from all
+# third-party components that the IIP has a require to (direct and indirect).
+#
+# It will output the source paths of the files copied to stdout.
+#
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use strict;
+use warnings FATAL => 'all';
+use KreaTV;
+
+my $target_dir = shift;
+
+
+if (! $ENV{'REQUIRE_FILE'}) {
+    exit 0;
+}
+
+my $reqfile = $ENV{'REQUIRE_FILE'};
+if (! -f $reqfile) {
+    KreaTV::error("Requires file not found: $reqfile");
+}
+
+open(REQUIRES, "< $reqfile") or die "Could not open requires file: $reqfile: $!";
+my %oss_ignore;
+while (my $line = <REQUIRES>) {
+    if ($line =~ m/^TREE_OSS_IGNORE\s*=\s*(.+)$/) {
+        for (split / /, $1) {
+            $oss_ignore{$_} = 1;
+        }
+    }
+    elsif ($line =~ m/^TREEDIRS\s*=\s*(.+)$/) {
+        my @components = split / /, $1;
+        for (@components) {
+            my $makefile = "$ENV{'BSG_SRC_ABS'}/$_/Makefile";
+            if (! -f $makefile) {
+                KreaTV::error("Makefile not found: $makefile");
+            }
+
+            # Make sure one of the following is true about the component:
+            # * is a 3PP
+            # * embeds 3PP code
+            # * has a kreatv license
+            if (system("grep -qE 'COMPONENT_(HAS_KTVLICENSE|(IS|EMBEDS)_3PP)' $makefile")) {
+                next;
+            }
+
+            # Ignore 3PP components only used for tests
+            my $numComponents = `grep -c ^COMPONENT_TARGETS $makefile`;
+            if (($numComponents == 1) &&
+                !system("grep -q ^COMPONENT_TARGETS[[:space:]+=]*\\\$\\\(TARGET_NAME_TEST\\\)[[:space:]+=]*\$ $makefile")) {
+                next;
+            }
+
+            # Ignore 3PP components that are listed in TREE_OSS_IGNORE
+            if ($oss_ignore{$_}) {
+                next;
+            }
+
+            my @license_files = (glob("$ENV{'BSG_SRC_ABS'}/$_/3PPLICENSE*"),
+                                 glob("$ENV{'BSG_SRC_ABS'}/$_/KTVLICENSE*"));
+            if (scalar(@license_files) == 0) {
+                KreaTV::error("third-party license file not found for component $_");
+            }
+
+            foreach my $license (@license_files) {
+                my $to = "$target_dir/$_";
+                KreaTV::system("mkdir -p $to");
+                KreaTV::system("cp -a $license $to");
+
+                print "$license\n";
+            }
+        }
+    }
+}
+
+close REQUIRES;

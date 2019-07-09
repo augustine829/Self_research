@@ -1,0 +1,23 @@
+#!/bin/bash
+
+wcroot=""
+
+while [ ! -d .svn ]; do
+  cd ..
+
+  if [ "$(pwd)" = "/" ]; then
+    exit 1
+  fi
+done
+
+while [ -d .svn ]; do
+  wcroot="$(pwd)"
+  cd ..
+done
+
+if [ -z "$wcroot" ]; then
+  exit 1
+fi
+
+echo $wcroot
+

@@ -1,0 +1,86 @@
+#!/bin/sh
+
+set -u
+
+error() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+if [ "$#" -ne 3 ]; then
+    echo >&2 "\
+Usage: $(basename $0) FROM_NUM TO_NUM COMMAND_TEMPLATE
+
+This program quickly finds the number in a range that makes a command using the
+number start returning false (exit code != 0) instead of true (exit code == 0)
+or vice versa.
+
+\$n in COMMAND_TEMPLATE will be expanded to a number between FROM_NUM and
+TO_NUM (inclusive) when probing. (It's OK if TO_NUM is less than FROM_NUM.)
+
+A typical use case is asking a question about Subversion repository contents
+using the svn commandline client. Examples:
+
+    # When did platform/helloworld disappear from trunk? I know it existed in
+    # r100000 but it doesn't exist in r400000.
+    $(basename $0) 100000 400000 'svn ls http://svn.arrisi.com/dev/bsg/trunk/platform/helloworld@\$n'
+
+    # When was the retrypolicy parameter removed from
+    # extension/iips/diagnostics/clients/tr069/description.xml on IRIS_release?
+    # I know it was there in r383251 but not in r420295.
+    $(basename $0) 420295 383251 'svn cat http://svn.arrisi.com/dev/bsg/branches/IRIS_release/extension/iips/diagnostics/clients/tr069/description.xml@\$n | grep retrypolicy'
+"
+    exit 1
+fi
+
+from=$1
+to=$2
+command=$3
+
+if [ $from -gt $to ]; then
+    tmp=$from
+    from=$to
+    to=$tmp
+fi
+
+run_command() {
+    local n=$1
+    eval "$command" >/dev/null 2>&1
+    echo $?
+}
+
+from_code=$(run_command $from)
+to_code=$(run_command $to)
+
+if [ $from_code -eq 0 ]; then
+    if [ $to_code -eq 0 ]; then
+        error "Both start points are true"
+    fi
+    reverse_logic=false
+else
+    if [ $to_code -ne 0 ]; then
+        error "Both start points are false"
+    fi
+    reverse_logic=true
+    command="! $command"
+fi
+
+while true; do
+    if [ $((to - from)) -eq 1 ]; then
+        if [ $reverse_logic = false ]; then
+            echo "Last true: $from"
+            echo "First false: $to"
+        else
+            echo "Last false: $from"
+            echo "First true: $to"
+        fi
+        exit 0
+    fi
+    middle=$((from + (to - from) / 2))
+    echo "Searching [$from,$to] ($((to - from)) left)"
+    if [ $(run_command $middle) -eq 0 ]; then
+        from=$middle
+    else
+        to=$middle
+    fi
+done

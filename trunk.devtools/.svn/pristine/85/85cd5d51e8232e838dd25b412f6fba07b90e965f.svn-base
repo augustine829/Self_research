@@ -1,0 +1,114 @@
+#!/bin/bash
+
+set -eu
+
+main_server=svn.arrisi.com
+svn=svn
+myname=$(basename $0)
+
+error() {
+    echo "$myname: error: $*" >&2
+    exit 1
+}
+
+usage() {
+   cat <<EOF
+Usage:
+    check_latest_trunk_merge [-r revision] [branch_pattern or file_with_list_of_branch_patterns]
+
+Options:
+    --revision/-r         trunk revision to check. HEAD is used by default.
+    --help / -h           Show this help.
+
+
+The file with a list of branch patterns shall list each branch on a new line.
+
+This script returns date and revision when a branch/several branches last 
+reached trunk and ten latest commit on branch. 
+EOF
+
+}
+
+do_your_thing() {
+    
+    branch_exists=$($svn info http://$main_server/dev/bsg/branches/$branch_pattern &> /dev/null || echo "NO")
+    
+    if [ "$branch_exists" == "NO" ]; then
+        echo -e "$branch_pattern: Branch does not exist\n"
+        return
+    fi
+
+    matches=$(grep "/$branch_pattern:" $tmpfile | sed -e 's!/bsg/branches/\(.*\):\(.*\)[-,]\(.*\)!\1:\3!g')
+
+    if [ -n "$matches" ]; then
+        for match in $matches; do
+            revision=$(echo "$match" |sed -e 's/\(.*\):\(.*\)/\2/g')
+            log_entry=$($svn log -r $revision:0 -l 1 http://$main_server/dev/bsg/branches/$branch_pattern | grep " line" |sed -e "s/\(.*\) \(.*\):\(.*\)/\1/g")
+            real_revision=$(echo $log_entry |sed -e "s/r\(.*\) \|\(.*\)/\1/g")
+            echo "$branch_pattern:"
+            echo " Latest revision merged to trunk: $log_entry"
+            echo -n " Number of branch commits since merged to trunk: "
+            $svn log -r $revision:HEAD http://$main_server/dev/bsg/branches/$branch_pattern |grep " line" |wc -l
+        done
+    else 
+        echo "$branch_pattern:"
+        echo " Branch has not been merged to trunk."
+        echo -n " Number of commits since created from trunk: "
+        $svn log --stop-on-copy http://$main_server/dev/bsg/branches/$branch_pattern |grep " line" |wc -l
+    fi
+    echo ""
+}
+
+list=
+branch_pattern=
+rev=
+
+i=0
+num_args="$#"
+while [ $i -lt $num_args ]; do
+    case $1 in
+        --revision|-r)
+            rev=$2
+            shift
+            i=$((i+1))
+            ;;
+        *)
+            branch_pattern=$1
+            ;;
+    esac
+    shift
+    i=$((i+1))
+done
+
+if [ -z "$rev" ]; then
+    rev="HEAD"
+fi
+
+if [ -z "$branch_pattern" ]; then
+    usage
+    exit 0
+fi
+
+tmpfile=$(mktemp)
+
+$svn pg svn:mergeinfo http://$main_server/dev/bsg/trunk@$rev >$tmpfile
+
+# Check if branch pattern is a file:
+if [ -f "$branch_pattern" ];then
+    list=$(cat $branch_pattern)
+    for branch_pattern in $list; do    
+        do_your_thing
+    done
+else
+    do_your_thing
+fi
+
+
+
+
+
+
+
+
+
+

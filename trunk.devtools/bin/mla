@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# Written by nqc643 Anders Petersson
+
+abort () {
+  echo "$0: Compilation failed - aborting."
+  exit 1
+}
+
+if [ $# -gt 0 ]
+then
+  for dir in $@
+  do 
+    make -C $dir local_all 2>&1 || abort
+  done
+else
+  make local_all 2>&1
+fi
+

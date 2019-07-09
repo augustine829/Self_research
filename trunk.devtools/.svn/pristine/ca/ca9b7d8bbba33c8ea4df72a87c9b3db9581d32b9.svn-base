@@ -1,0 +1,82 @@
+#!/bin/bash
+
+filter_build_log()
+{
+  egrep --color=none --line-buffered '(^\s+BUILD\s|make\[.*\]:\s\*\*\*\s.*|^\*\*\* FAILED:)'
+}
+
+print_usage()
+{
+  echo "$(basename $0) [--filter|--nofilter] [--color|--nocolor] [make arguments]"
+  echo "  This is a wrapper around make that will execute \`make' with proper -jN,"
+  echo "  save log to \$(wcroot)/.buildlogs, filter and colorify output on the screen."
+  echo
+  echo "  Options:"
+  echo "    --nofilter | --nofilter :"
+  echo "      Filter out most of the log showing only 'BUILD [component] [flavour]' lines and"
+  echo "      fail points."
+  echo "      Default is --nofilter."
+  echo "    --color | --nocolor :"
+  echo "      Highlight errors, warnings, etc."
+  echo "      Default is --color."
+  echo
+  echo "    Rest of the arguments will be passed to \`make' as is."
+
+}
+
+filter=0
+color=1
+
+args=()
+
+for a in "$@"; do
+  case $a in
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    --filter)
+      filter=1
+      ;;
+    --nofilter)
+      filter=0
+      ;;
+    --color)
+      color=1
+      ;;
+    --nocolor)
+      color=0
+      ;;
+    *)
+      args[${#args[@]}]="$a"
+      ;;
+  esac
+done
+
+wcroot="$(wcroot)"
+
+if [ -z "$wcroot" ]; then
+  echo "Warning: not within SVN repository"
+else
+  branch="$(basename "$wcroot")"
+  log_dir="$wcroot/.buildlogs"
+  mkdir -p "$log_dir"
+fi
+
+
+num_cores=$(cat /proc/cpuinfo | grep processor | wc -l)
+cmd="make -j\$num_cores \"\${args[@]}\" 2>&1"
+
+if [ -n "$log_dir" ]; then
+  log_file="$log_dir/$branch.$(date +%F_%H.%M.%S).build.log"
+  echo Log will be saved to $log_file
+  cmd+=" | tee '$log_file'"
+else
+  echo Log will not be saved
+fi
+
+[ $filter == "1" ] && cmd+=" | filter_build_log"
+[ $color == "1" ] && cmd+=" | paint_build_log"
+
+eval "$cmd; ret=\${PIPESTATUS[0]}"
+exit $ret

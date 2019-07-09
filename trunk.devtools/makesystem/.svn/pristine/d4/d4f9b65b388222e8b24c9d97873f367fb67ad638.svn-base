@@ -1,0 +1,165 @@
+#!/usr/bin/env python2
+
+import argparse
+import os
+import stat
+import sys
+
+
+def fail(message):
+    print >> sys.stderr, 'generate_kit_build_script: error: ' + message
+    sys.exit(1)
+
+
+class ToolchainTestParameters:
+    def __init__(self, compiler, devices):
+        self.compiler = compiler
+        self.devices = devices
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=('Generate a shell script that builds a kit using the '
+                     'build_kit program and, optionally, tests said kit.'))
+
+    parser.add_argument('--devices',
+                        required=True,
+                        metavar='DEVICE',
+                        nargs='+',
+                        help='List of devices to build/test for.')
+
+    parser.add_argument(
+        '--kit-config',
+        required=True,
+        help='Kit configuration path relative to build script.')
+
+    parser.add_argument(
+        '--test-program',
+        required=False,
+        help='Path to an executable test program within a kit.')
+
+    parser.add_argument('--build-script',
+                        required=True,
+                        help='Path of generated build script.')
+
+    parser.add_argument(
+        '--toolchain_info',
+        required=True,
+        action='append',
+        help='List of all toolchains, their devices and the path to cxx.')
+
+    return parser.parse_args()
+
+
+def main():
+    arguments = parse_args()
+
+    toolchain_infos = []
+
+    for toolchain_info in arguments.toolchain_info:
+        info = {}
+        for key_value_pair in toolchain_info.split(","):
+            key, value = key_value_pair.split(":")
+            info[key] = value
+        toolchain_infos.append(info)
+
+    # Get all devices from all toolchains
+    toolchain_devices_all = {}
+    cxx_list = {}
+    for info in toolchain_infos:
+        toolchain_devices_all[info["name"]] = info["devices"].split()
+        cxx_list[info["name"]] = info["cxx"]
+
+    # Check which toolchains/devices are referred to by --devices
+    toolchain_devices_used = {}
+    valid_device_arguments = set()
+    for toolchain, devices in toolchain_devices_all.items():
+        for device in devices:
+            if device in arguments.devices:
+                valid_device_arguments.add(device)
+                if toolchain not in toolchain_devices_used:
+                    toolchain_devices_used[toolchain] = []
+                toolchain_devices_used[toolchain].append(device)
+
+    invalid_device_arguments = \
+        set(arguments.devices).difference(valid_device_arguments)
+    if invalid_device_arguments != set():
+        fail('Invalid device names: ' + ', '.join(invalid_device_arguments))
+
+    # Arrange information per toolchain
+    toolchain_test_parameters = {}
+    for toolchain in toolchain_devices_used:
+        cxx = cxx_list[toolchain]
+        toolchain_test_parameters[toolchain] = ToolchainTestParameters(
+            compiler=cxx, devices=toolchain_devices_used[toolchain])
+
+    # Generate script
+    header = """\
+#!/bin/bash
+
+set -e
+set -u"""
+
+    args_setup = """\
+iips_dir=$1
+kits_dir=$2
+tools_dir=$3
+kit_archive=$4
+
+restricted_software_notice=$(pwd)/.restricted_software_notice.txt
+
+kit_config=$(dirname $0)/../%s""" % arguments.kit_config
+
+    kit_target_hws =  \
+        ' '.join(['--architecture %s_%s' % (toolchain, device)
+                  for toolchain in toolchain_devices_used
+                  for device in toolchain_devices_used[toolchain]])
+    build_command = """\
+PERL5LIB=$tools_dir \\
+KITS_DIR=$kits_dir \\
+$tools_dir/build_kit \\
+  --restricted-software-notice $restricted_software_notice \\
+  --config $kit_config \\
+  --source $iips_dir \\
+  %(kit_target_hws)s \\
+  --kit $kit_archive""" % {'kit_target_hws': kit_target_hws}
+
+    post_build_commands = []
+    if arguments.test_program is not None:
+        post_build_commands.append("""\
+if ! tar -xf $kit_archive dist/test 2>/dev/null; then
+  echo "There are no tests to execute."
+  cat $restricted_software_notice; rm $restricted_software_notice;
+  exit 0
+fi
+""")
+        hws = ""
+        for toolchain, test_parameters in toolchain_test_parameters.items():
+            hws = hws + ' '.join(test_parameters.devices) + " "
+        post_build_commands.append("""\
+if [ -f %(test_program)s ]; then
+  HW_VARIANTS="%(hws)s" \\
+  %(test_program)s $kit_archive
+fi
+""" % {'hws': hws, 'test_program': arguments.test_program})
+
+    post_build_commands.append("""\
+cat $restricted_software_notice; rm $restricted_software_notice;
+""")
+
+    program = """\
+%s
+
+%s
+
+%s
+
+%s""" % (header, args_setup, build_command, '\n'.join(post_build_commands))
+
+    open(arguments.build_script, 'w').write(program.strip())
+    os.chmod(arguments.build_script,
+             os.stat(arguments.build_script).st_mode | stat.S_IXUSR)
+
+
+if __name__ == '__main__':
+    main()

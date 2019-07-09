@@ -1,0 +1,35 @@
+#!/bin/sh
+
+if [ ! -x /bin/bash ]; then
+    echo
+    echo "Error: Build scripts require bash."
+    echo
+    echo "On Linux distribution Fedora, run the following command:"
+    echo
+    echo "    su -c \"yum install bash\""
+    echo
+    exit 1
+fi
+
+if ! perl --version > /dev/null 2>&1; then
+    echo
+    echo "Error: Build scripts require perl."
+    echo
+    echo "On Linux distribution Fedora, run the following command:"
+    echo
+    echo "    su -c \"yum install perl\""
+    echo
+    exit 1
+fi
+
+if ! python2 -V > /dev/null 2>&1; then
+    echo
+    echo "Error: Missing python2 binary."
+    echo
+    echo "Make sure you have installed Python 2 and that a link to the"
+    echo "Python binary named python2 exists."
+    echo
+    exit 1
+fi
+
+exit 0

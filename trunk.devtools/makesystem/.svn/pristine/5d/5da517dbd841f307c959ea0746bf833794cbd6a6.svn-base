@@ -1,0 +1,16 @@
+# Build and run unit tests
+BUILD_TEST = true
+
+# ST40
+BUILD_VIP28X3 = true
+
+# ST9
+BUILD_VIP43X3 = true
+
+# BCM45
+BUILD_VIP29X2 = true
+
+# BCM15
+BUILD_VIP35X0 = true
+BUILD_VIP43X2 = true
+BUILD_VIP55X2 = true

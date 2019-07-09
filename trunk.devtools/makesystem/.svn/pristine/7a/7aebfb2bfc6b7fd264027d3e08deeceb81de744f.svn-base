@@ -1,0 +1,23 @@
+
+# $(TARGET_NAME_HOST)
+ifeq ($(TOOLCHAIN), $(HOST_TOOLCHAIN_NAME))
+  ifneq ($(filter $(TARGET_NAME_HOST) $(TARGET_NAME_TEST), $(COMPONENT_TARGETS)),)
+    _auto_ldflags += -lab2
+    _auto_ldflags += -lab1
+  endif
+endif
+
+# $(TARGET_NAME_NOARCH)
+ifneq ($(filter $(TOOLCHAIN) $(DEVICE), $(TARGET_NAME_NOARCH)),)
+  _auto_ldflags += -lab2
+  _auto_ldflags += -lab1
+endif
+
+# $(TARGET_NAME_TEST)
+ifeq ($(TOOLCHAIN), $(HOST_TOOLCHAIN_NAME))
+  ifeq ($(filter $(TARGET_NAME_TEST), $(COMPONENT_TARGETS)) $(strip $(BUILD_TEST)), $(TARGET_NAME_TEST) true)
+    _auto_ldflags += -lmocks_a_aa
+    _auto_ldflags += -lab2
+    _auto_ldflags += -lab1
+  endif
+endif

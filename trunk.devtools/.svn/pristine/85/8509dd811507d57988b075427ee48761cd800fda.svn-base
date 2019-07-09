@@ -1,0 +1,373 @@
+#!/bin/sh
+
+set -eu
+
+serverlist_url="http://svn.arrisi.com/remotesvn-servers.txt"
+svn_auth_realm="<http://svn.arrisi.com:80> Subversion repository"
+server_file=".svn/remotesvn-server.txt"
+merge_id_file=".svn/remotesvn-merge-id.txt"
+curl_flags="--silent --fail --location"
+
+
+# Force C locale since translated messages from SVN will mess up our
+# assumptions about command output.
+LC_ALL=C
+export LC_ALL
+
+usage() {
+    cat <<EOF
+Usage:
+    remotesvn diff <url1>[@revision] <url2>[@revision]
+    remotesvn diff -r <revision1>:<revision2> <url>
+    remotesvn diff -c <revision> <url>
+
+    remotesvn merge <url1>[@revision] <url2>[@revision]
+    remotesvn merge -r <revision1>:<revision2> <url>
+    remotesvn merge -c <revision> <url>
+    remotesvn merge <url>
+
+    remotesvn commit
+    remotesvn commit -m "<commit message>"
+    remotesvn commit -F <file containing commit message>
+
+This program makes use of a remote server, which sits close to the SVN server,
+to speed up diffs, merges and commits.
+
+"remotesvn merge" performs a merge by running the actual merge command on the
+remote server. The merge result is then in an efficient way sent back to the
+local working copy so that any conflicts can be resolved locally. After
+resolving any conflicts, the result can committed from the local machine.
+Alternatively, the resolved tree can efficiently be sent to the remote server
+and committed from there by running "remotesvn commit".
+
+No svn options than those listed below are supported. Also, the [WCPATH] part
+of "svn merge" arguments is not supported; it is assumed that the current
+working directory is the SVN working copy in which the merge should be made.
+
+"remotesvn merge" is automatically run with --accept=postpone.
+
+Example usage:
+    remotesvn diff http://svn.arrisi.com/dev/bsg/trunk \\
+                   http://svn.arrisi.com/dev/bsg/branches/DEV_example
+    remotesvn merge http://svn.arrisi.com/dev/bsg/trunk@12345 \\
+                    http://svn.arrisi.com/dev/bsg/branches/DEV_example@67890
+    remotesvn merge -r 12345:13579 http://svn.arrisi.com/dev/bsg/trunk
+    remotesvn merge http://svn.arrisi.com/dev/bsg/trunk
+    remotesvn merge --reintegrate \\
+                    http://svn.arrisi.com/dev/bsg/branches/DEV_example
+    remotesvn commit
+    remotesvn commit -m "Rebase."
+
+Options:
+    -F, --file X      Use message in file X when committing.
+    -h, --help        Print this help text.
+    -m, --message X   Use message X when committing.
+        --noproxy     Disable proxy. Use this if you have trouble disabling
+                      proxy support by setting curl environment variables.
+        --password X  Use password X when authenticating to the SVN server. By
+                      default, the script tries to find a previously stored
+                      password in ~/.subversion/auth.
+    -s, --server X    Use remote server X instead of one of the default
+                      servers.
+        --username X  Use username X when authenticating to the SVN server. By
+                      default, the script uses the current username.
+    -v, --verbose     Be verbose.
+EOF
+}
+
+get_svn_client_version() {
+    svn --version | perl -lane 'print $F[2] if $. == 1'
+}
+
+get_unique_enough_id() {
+    local wc_url=$1
+    (date +%s.%N; echo $wc_url; hostname; id) | sha1sum | awk '{print $1}'
+}
+
+get_server_from_server_map() {
+    local server_map=$(curl $curl_flags $serverlist_url)
+    if [ -z "$server_map" ]; then
+        error "Failed to get remote server list; you have to set up http_proxy and NO_PROXY so that \"curl $curl_flags $serverlist_url\" works (see \"man curl\") or perhaps use --noproxy"
+    fi
+    # Choose a random of the matching servers:
+    echo "$server_map" | perl -lane '
+      {
+        push(@matching, $F[0]) if "'"$client_version"'" =~ /$F[1]/;
+      }
+      END {
+        if (@matching) {
+          print $matching[int(rand(@matching))];
+        }
+      }
+    '
+}
+
+get_server() {
+    if [ -n "$explicit_server" ]; then
+        echo "$explicit_server"
+    else
+        local server=$(get_server_from_server_map)
+        if [ -z "$server" ]; then
+            error "Could not find a suitable server for your SVN client version ($client_version), sorry";
+        fi
+        echo "$server"
+    fi
+}
+
+get_auth_key() {
+    # OK, this is a bit ugly and of course relies on internal details about how
+    # Subversion stores the passwords, but it's worth a try, right?
+    local key=$1
+    local realm_hash=$(echo -n $svn_auth_realm | md5sum | awk '{print $1}')
+    local auth_file="$HOME/.subversion/auth/svn.simple/$realm_hash"
+    if [ -f $auth_file ]; then
+        sed -n '/^'$key'$/{n;n;p;q}' $auth_file
+    fi
+}
+
+get_commit_message() {
+    local output=$1
+    if [ -n "$commit_message" ]; then
+        echo "$commit_message" >$output
+    elif [ -n "$commit_message_file" ]; then
+        cp "$commit_message_file" $output
+    else
+        editor="${SVN_EDITOR:-${VISUAL:-${EDITOR:-}}}"
+        if [ -z "$editor" ]; then
+            error "Please set SVN_EDITOR or EDITOR, or use -m or -F to specify commit message"
+        fi
+        local commit_msg=svn-commit.msg
+        cat >$commit_msg <<EOF
+
+--This line, and those below, will be ignored--
+
+$(svn status --ignore-externals | grep -Ev '^(X|\? *svn-commit.msg$)')
+EOF
+        echo "Please enter commit message in editor..."
+        if $editor svn-commit.msg; then
+            cp $commit_msg $output
+            rm -f $commit_msg
+        else
+            error "Commit aborted"
+        fi
+    fi
+}
+
+check_conflicts() {
+    svn status | egrep '^(C|.C|......[C>]|\?.*\.prej$)'
+}
+
+merge() {
+    if [ "$#" -lt 1 ]; then
+        error "Too few arguments for the merge command; try the \"-h\" flag"
+    fi
+
+    echo "Verifying local working copy..."
+    if svn status --no-ignore -v | grep '^[^ PX]'; then
+        error "Working copy is not clean (see above); please use a clean checkout"
+    fi
+
+    local wc_url=$(svn info | awk '$1== "URL:" {print $2}')
+    local merge_id=$(get_unique_enough_id $wc_url)
+    local server=$(get_server)
+
+    printf '%s\n%s\n%s\n%s\n%s\n' \
+           "$verbose" "$username" "$password" "$wc_url" "$merge_id" \
+        | $ssh $server $remote_libdir/domerge "$@" || true
+
+    echo "Updating local working copy from result on remote server..."
+    rsync -e "$ssh" -a $rsync_verbose --delete \
+          $server:$remote_workdir/$merge_id/ .
+    echo $server >$server_file
+    echo $merge_id >$merge_id_file
+
+    echo "Checking for conflicts..."
+    if check_conflicts; then
+        cat <<EOF
+The merge resulted in conflicts (see above). When you have resolved the
+conflicts, you can commit directly or commit via the remote server by running
+this command:
+EOF
+    else
+        cat <<EOF
+No conflicts. You can now commit directly or commit via the remote server by
+running this command:
+EOF
+    fi
+    echo "    remotesvn commit"
+}
+
+commit() {
+    if [ ! -f $merge_id_file ] || [ ! -f $server_file ]; then
+        error "No previous merge by \"remotesvn merge\" detected"
+    fi
+
+    echo "Checking for remaining conflicts..."
+    if check_conflicts; then
+        error "Please resolve the above conflicts before committing"
+    fi
+
+    local server=$(cat $server_file)
+    local merge_id=$(cat $merge_id_file)
+    local wcdir="$remote_workdir/$merge_id"
+    local msgfile=$(mktemp)
+    get_commit_message $msgfile
+
+    echo "Transferring working copy to remote server..."
+    rsync -e "$ssh" -a $rsync_verbose --delete ./ $server:"$wcdir"
+
+    (printf '%s\n%s\n%s\n%s\n' \
+            "$verbose" "$username" "$password" "$merge_id";
+     cat $msgfile) \
+        | $ssh $server $remote_libdir/docommit
+    rm -f $msgfile
+
+    echo "Updating local working copy from result on remote server..."
+    rsync -e "$ssh" -a $rsync_verbose --delete \
+          $server:$remote_workdir/$merge_id/ .
+
+    echo "Done!"
+}
+
+diff() {
+    if [ "$#" -lt 2 ]; then
+        error "Too few arguments for the diff command; try the \"-h\" flag"
+    fi
+
+    local server=$(get_server)
+    printf '%s\n%s\n' "$username" "$password" | \
+        $ssh $server $remote_libdir/dodiff $summarize "$@"
+}
+
+###############################################################################
+
+libdir=$(dirname $0)/../lib/remotesvn
+. $libdir/common.sh
+
+key_file=$(mktemp)
+trap "rm -f $key_file" EXIT
+cp $libdir/id_rsa $key_file
+chmod 600 $key_file  # SSH is paranoid about this.
+
+ssh="ssh -q -i $key_file -l remotemerge -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+explicit_server=
+summarize=
+verbose=false
+username=
+password=
+command=none
+commit_message=
+commit_message_file=
+noproxy=false
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 1
+fi
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        commit|diff|merge)
+            command=$1
+            ;;
+        ci)
+            command=commit
+            ;;
+        di)
+            command=diff
+            ;;
+        -F|--file)
+            commit_message_file=$2
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -m|--message)
+            commit_message=$2
+            shift
+            ;;
+        --noproxy)
+            noproxy=true
+            ;;
+        --password)
+            password=$2
+            shift
+            ;;
+        -r|-c|--reintegrate)
+            # Arguments to SVN merge start here.
+            break
+            ;;
+        -s|--server|--)
+            explicit_server=$2
+            shift
+            ;;
+        --summarize)
+            summarize="--summarize"
+            ;;
+        --username)
+            username=$2
+            shift
+            ;;
+        -v|--verbose)
+            verbose=true
+            ;;
+        -*)
+            error "Unknown option: $1; try the \"-h\" flag"
+            ;;
+        *)
+            break
+            ;;
+    esac
+
+    shift
+done
+
+if [ $command = none ]; then
+    usage
+    exit 1
+fi
+
+rsync_verbose=
+if [ $verbose = true ]; then
+    rsync_verbose=--verbose
+fi
+
+if [ $noproxy = true ]; then
+    curl_flags="$curl_flags --noproxy svn.arrisi.com"
+fi
+
+check_installed curl
+check_installed md5sum
+check_installed rsync
+check_installed sha1sum
+check_installed ssh
+check_installed svn
+
+if [ $command = merge ] || [ $command = commit ]; then
+    if ! svn info >/dev/null 2>&1; then
+        error "Current working directory ($PWD) is not an SVN working copy"
+    fi
+
+    if svn info .. >/dev/null 2>&1; then
+        error "$PWD is not the top directory of an SVN working copy"
+    fi
+fi
+
+client_version=$(get_svn_client_version)
+
+if [ -z "$username" ]; then
+    username=$(get_auth_key username)
+fi
+if [ -z "$username" ]; then
+    username=$USER
+fi
+if [ -z "$password" ]; then
+    password=$(get_auth_key password)
+fi
+if [ -z "$password" ]; then
+    error "You must supply the SVN server password using --password"
+fi
+
+$command "$@"

@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -u
+
+cd $(dirname $0)
+
+status=0
+
+######################################################################
+
+run_test() {
+    local testcase=$1 component=$2
+
+    ../../build_requires $PWD/../.. source_dir $component || status=1
+    for x in requires requires_setup requires_depend requires_list; do
+        diff -u testcases/$testcase/$x source_dir/$component/.$x || status=1
+    done
+}
+
+######################################################################
+
+run_test simple_leaf_component a/aa
+run_test root_component .
+run_test complex_leaf_component b
+
+######################################################################
+
+if [ $status -eq 0 ]; then
+    echo OK
+else
+    echo FAIL
+fi
+exit $status

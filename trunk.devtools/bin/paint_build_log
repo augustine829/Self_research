@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# colors
+c="\e[36m"
+m="\e[35m"
+y="\e[33m"
+r="\e[31m"
+g="\e[32m"
+b="\e[34m"
+w="\e[37m"
+
+rst="\e[0m"
+dim="\e[2m"
+brt="\e[1m"
+und="\e[4m"
+
+re=''
+
+re+="s/(make.*: \\*\\*\\* .*)/$brt$y\$1$rst/; "
+re+="s/(\\*\\*\\* FAILED:)/$brt$r\$1$rst/; "
+re+="s/^(\\s*BUILD\\b\\s*)(.+)(\\s*)(\\[(.+)\\])/$brt$b\$1$rst\$2\$3$dim\$4$rst/; "
+
+cmds=('INSTALL' 'CC' 'CXX' 'LD' 'LINK' 'GET_BINARY')
+
+for cmd in "${cmds[@]}"; do
+  re+="s/^(\\s*$cmd\\b)/$brt$b\$1$rst/; "
+done
+
+re+="s/\\b(warning)\\b/$brt$y\$1$rst/i; "
+re+="s/\\b(error)\\b/$brt$r\$1$rst/i; "
+
+perl -p -e "$re"

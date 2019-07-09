@@ -1,0 +1,214 @@
+Index: uncrustify-0.60/src/indent.cpp
+===================================================================
+--- uncrustify-0.60.orig/src/indent.cpp
++++ uncrustify-0.60/src/indent.cpp
+@@ -210,6 +210,11 @@ void align_to_column(chunk_t *pc, int co
+    } while ((pc != NULL) && (pc->nl_count == 0));
+ }
+ 
++static_inline bool is_past_width(chunk_t *pc)
++{
++   // allow char to sit at last column by subtracting 1
++   return((pc->column + pc->len() - 1) > cpd.settings[UO_code_width].n);
++}
+ 
+ /**
+  * Changes the initial indent for a line to the given column
+@@ -217,7 +222,7 @@ void align_to_column(chunk_t *pc, int co
+  * @param pc      The chunk at the start of the line
+  * @param column  The desired column
+  */
+-void reindent_line2(chunk_t *pc, int column, const char *fcn_name, int lineno)
++void reindent_line2(chunk_t *pc, int column, const char *fcn_name, int lineno, int *indent_column)
+ {
+    LOG_FMT(LINDLINE, "%s: %d] col %d on %s [%s] => %d <called from '%s' line %d\n",
+            __func__, pc->orig_line, pc->column, pc->str.c_str(),
+@@ -228,9 +233,12 @@ void reindent_line2(chunk_t *pc, int col
+       return;
+    }
+ 
++   chunk_t *original_chunk = pc;
++
+    int col_delta = column - pc->column;
+    int min_col   = column;
+ 
++   pc->column_prev = pc->column;
+    pc->column = column;
+    do
+    {
+@@ -243,6 +251,8 @@ void reindent_line2(chunk_t *pc, int col
+       min_col += space_col_align(pc, next);
+       pc       = next;
+ 
++      pc->column_prev = pc->column;
++
+       bool is_comment = chunk_is_comment(pc);
+       bool keep       = is_comment && chunk_is_single_line_comment(pc) &&
+                         cpd.settings[UO_indent_relative_single_line_comments].b;
+@@ -268,6 +278,24 @@ void reindent_line2(chunk_t *pc, int col
+                  pc->str.c_str(), pc->column, pc->orig_col);
+       }
+    } while ((pc != NULL) && (pc->nl_count == 0));
++
++   // Do not indent a line which will exceed line width limit
++   if (is_past_width(pc)) {
++      LOG_FMT(LINDLINE, "%s: Ignoring indent of %s since it will break line width limit\n",
++              __func__, pc->text());
++
++      pc = original_chunk;
++      do {
++         pc->column = pc->column_prev;
++         pc = chunk_get_next(pc);
++      } while ((pc != NULL) && (pc->nl_count == 0));
++
++      if (indent_column != NULL) {
++         LOG_FMT(LINDLINE, "%s: setting indent_column to %d\n", __func__, pc->column);
++         *indent_column = original_chunk->column;
++      }
++      return;
++   }
+ }
+ 
+ 
+@@ -1394,7 +1422,7 @@ void indent_text(void)
+          else if ((pc->parent_type == CT_SQL_EXEC) &&
+                   cpd.settings[UO_indent_preserve_sql].b)
+          {
+-            reindent_line(pc, sql_col + (pc->orig_col - sql_orig_col));
++            reindent_line_try(pc, sql_col + (pc->orig_col - sql_orig_col));
+             LOG_FMT(LINDENT, "Indent SQL: [%s] to %d (%d/%d)\n",
+                     pc->str.c_str(), pc->column, sql_col, sql_orig_col);
+          }
+@@ -1408,7 +1436,7 @@ void indent_text(void)
+             tmp = cpd.settings[UO_indent_member].n + indent_column;
+             LOG_FMT(LINDENT, "%s: %d] member => %d\n",
+                     __func__, pc->orig_line, tmp);
+-            reindent_line(pc, tmp);
++            reindent_line_try(pc, tmp);
+          }
+          else if ((vardefcol > 0) &&
+                   (pc->level == pc->brace_level) &&
+@@ -1421,7 +1449,7 @@ void indent_text(void)
+          {
+             LOG_FMT(LINDENT, "%s: %d] Vardefcol => %d\n",
+                     __func__, pc->orig_line, vardefcol);
+-            reindent_line(pc, vardefcol);
++            reindent_line_try(pc, vardefcol);
+          }
+          else if ((pc->type == CT_STRING) && (prev != NULL) && (prev->type == CT_STRING) &&
+                   cpd.settings[UO_indent_align_string].b)
+@@ -1430,7 +1458,7 @@ void indent_text(void)
+ 
+             LOG_FMT(LINDENT, "%s: %d] String => %d\n",
+                     __func__, pc->orig_line, tmp);
+-            reindent_line(pc, tmp);
++            reindent_line_try(pc, tmp);
+          }
+          else if (chunk_is_comment(pc))
+          {
+@@ -1442,7 +1470,7 @@ void indent_text(void)
+          {
+             LOG_FMT(LINDENT, "%s: %d] pp-indent => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else if (chunk_is_paren_close(pc) || (pc->type == CT_ANGLE_CLOSE))
+          {
+@@ -1474,7 +1502,7 @@ void indent_text(void)
+             }
+             LOG_FMT(LINDENT, "%s: %d] cl paren => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else if (pc->type == CT_COMMA)
+          {
+@@ -1485,7 +1513,7 @@ void indent_text(void)
+             }
+             LOG_FMT(LINDENT, "%s: %d] comma => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else if (cpd.settings[UO_indent_func_const].n &&
+                   (pc->type == CT_QUALIFIER) &&
+@@ -1502,7 +1530,7 @@ void indent_text(void)
+             indent_column_set(indent_column + cpd.settings[UO_indent_func_const].n);
+             LOG_FMT(LINDENT, "%s: %d] const => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else if (cpd.settings[UO_indent_func_throw].n &&
+                   (pc->type == CT_THROW) &&
+@@ -1512,7 +1540,7 @@ void indent_text(void)
+             indent_column_set(indent_column + cpd.settings[UO_indent_func_throw].n);
+             LOG_FMT(LINDENT, "%s: %d] throw => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else if (pc->type == CT_BOOL)
+          {
+@@ -1522,13 +1550,13 @@ void indent_text(void)
+                indent_column_set(frm.pse[frm.pse_tos].pc->column);
+                if (cpd.settings[UO_indent_first_bool_expr].b)
+                {
+-                  reindent_line(chunk_get_next(frm.pse[frm.pse_tos].pc),
++                  reindent_line_try(chunk_get_next(frm.pse[frm.pse_tos].pc),
+                                 indent_column + pc->len() + 1);
+                }
+             }
+             LOG_FMT(LINDENT, "%s: %d] bool => %d [%s]\n",
+                     __func__, pc->orig_line, indent_column, pc->str.c_str());
+-            reindent_line(pc, indent_column);
++            reindent_line_try(pc, indent_column);
+          }
+          else
+          {
+@@ -1536,7 +1564,7 @@ void indent_text(void)
+             {
+                LOG_FMT(LINDENT, "%s: %d] indent => %d [%s]\n",
+                        __func__, pc->orig_line, indent_column, pc->str.c_str());
+-               reindent_line(pc, indent_column);
++               reindent_line_try(pc, indent_column);
+             }
+          }
+          did_newline = false;
+Index: uncrustify-0.60/src/prototypes.h
+===================================================================
+--- uncrustify-0.60.orig/src/prototypes.h
++++ uncrustify-0.60/src/prototypes.h
+@@ -73,8 +73,9 @@ void indent_preproc(void);
+ void indent_to_column(chunk_t *pc, int column);
+ void align_to_column(chunk_t *pc, int column);
+ 
+-#define reindent_line(pc, col)    reindent_line2(pc, col, __func__, __LINE__)
+-void reindent_line2(chunk_t *pc, int column, const char *fcn_name, int lineno);
++#define reindent_line(pc, col)    reindent_line2(pc, col, __func__, __LINE__, NULL)
++#define reindent_line_try(pc, col)    reindent_line2(pc, col, __func__, __LINE__, &frm.pse[frm.pse_tos].indent)
++void reindent_line2(chunk_t *pc, int column, const char *fcn_name, int lineno, int* indent_column = NULL);
+ void quick_indent_again(void);
+ 
+ 
+Index: uncrustify-0.60/src/uncrustify_types.h
+===================================================================
+--- uncrustify-0.60.orig/src/uncrustify_types.h
++++ uncrustify-0.60/src/uncrustify_types.h
+@@ -250,6 +250,7 @@ struct chunk_t
+       pp_level = 0;
+       after_tab = false;
+       str.clear();
++      column_prev = 0;
+    }
+    int len()
+    {
+@@ -280,6 +281,7 @@ struct chunk_t
+    int          pp_level;         /* nest level in #if stuff */
+    bool         after_tab;        /* whether this token was after a tab */
+    unc_text     str;              /* the token text */
++   int          column_prev;      /* indent level of previous indent iteration */
+ };
+ 
+ enum

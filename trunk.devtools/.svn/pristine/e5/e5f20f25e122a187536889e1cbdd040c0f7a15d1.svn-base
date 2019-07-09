@@ -1,0 +1,101 @@
+#!/usr/bin/python
+#
+# Simple script used to make a copy of a file.
+# See usage function for help.
+#
+import sys
+import os
+import getopt
+import subprocess
+
+version = "1.00"
+
+def usage():
+    print """
+    %s version %s
+
+    Make a backup copy of the specified file(s).
+
+    usage: %s [option] file(s)
+
+      file(s)   What to make a backup copy of.
+
+    option:
+
+      -m or --move        Move the file(s) rather than copy
+
+    Example:
+
+      %s main.js          Will copy main.js to main.js.yyyymmddhhmm
+      %s -m main.js       Will move main.js to main.js.yyyymmddhhmm
+
+    """ % (my_name, version, my_name, my_name, my_name)
+
+
+move = False
+debug_level = 0
+
+def do_backup(files):
+    if len(files) == 0:
+        print '%s ERROR: expected filename(s)' % my_name
+    else:
+        for file in files:
+            if os.path.exists(file):
+                subp = subprocess.Popen(['date', '+%Y%m%d%H%M'],
+                                        stdout=subprocess.PIPE)
+                now, err = subp.communicate()
+                new_file = file + '.' + now
+                new_file = new_file.strip()
+                if move:
+                    debug(0, "%s: move '%s' to '%s'"
+                          % (my_name, file, new_file))
+                    subprocess.call(['mv', file, new_file])
+                else:
+                    debug(0, "%s: copy '%s' to '%s'"
+                          % (my_name, file, new_file))
+                    subprocess.call(['cp', file, new_file])
+            else:
+                print "%s: file '%s' not found" % (my_name, file)
+
+
+def main():
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "dhvm",
+                                   ["debug", "help", "verbose", "move"])
+    except getopt.GetoptError, err:
+        print str(err)  # will print something like "option -a not recognized"
+        usage()
+        sys.exit(2)
+    global move
+    move = False
+    global debug_level
+    debug_level = 0
+    debug(2, 'opts: %s' % opts)
+    debug(2, 'args: %s' % args)
+    for o, a in opts:
+        if o in ("-v", "--verbose"):
+            print "verbose mode"
+            debug_level = 1
+        elif o in ("-h", "--help"):
+            usage()
+            sys.exit(3)
+        elif o in ("-d", "--debug"):
+            print 'debug mode'
+            debug_level = 2
+        elif o in ("-m", "--move"):
+            move = True
+        else:
+            assert False, "unhandled option"
+    do_backup(args)
+
+
+def debug(level, str):
+    if (debug_level >= level):
+        print str
+
+
+if __name__ == "__main__":
+    wc_home = ''
+    my_name = os.path.basename(sys.argv[0])
+    cwd = os.getcwd()
+    main()

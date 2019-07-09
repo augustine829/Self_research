@@ -1,0 +1,34 @@
+#!/bin/sh
+
+if [ "$1" = "-h" -o "$1" = "--help" ];then
+   cat <<EOF
+Usage:
+ Run 'findexternals' in any SVN working copy directory to find and print all SVN externals.
+EOF
+   exit 0
+fi
+
+svn propget -R svn:externals "$@" |
+  perl -ane '
+    BEGIN {
+      use List::Util qw(max);
+      $/ = "\n\n";
+    }
+
+    chomp;
+    s/ +/ /g;
+    ($component, $externals) = /^\s*(\S+) - (.*)/s;
+    while ($externals =~ /(\S+) (.*)/g) {
+      push @components, $component;
+      push @directories, $1;
+      push @urls, $2;
+    }
+
+    END {
+      $c_width = max map {length} @components;
+      $d_width = max map {length} @directories;
+      for ($i = 0; $i < @components; ++$i) {
+        printf("%-*s %-*s %s\n", $c_width, $components[$i], $d_width, $directories[$i], $urls[$i]);
+      }
+    }' |
+  LC_ALL=C sort

@@ -1,0 +1,131 @@
+#!/bin/bash
+# This is a script for internal use by
+#   unpack-root
+#   upload-blobs
+#   upload-bi
+#   use-nfs
+#   use-bi
+# It checks the presence and validity of environment variables
+#   STBMODEL
+#   BRANCH
+#   NFSPATH
+#   TFTPHOST
+#   ROOTHOST
+#   CODEHOME
+#   REMOTEUSER
+
+TOOLDIR=$(dirname $(which $0))
+
+function check_branch
+{
+    if [ -z "${BRANCH}" ]; then
+	echo "Error: BRANCH is not set!" >&2
+	exit 1
+    fi
+}
+
+function check_codehome
+{
+    if [ -z "${CODEHOME}" ]; then
+	echo "Error: CODEHOME is not set! CODEHOME should typically be /extra/\$USER" >&2
+	exit 1
+    fi
+}
+
+function check_host
+{
+    if [ -z "${STBHOST}" ]; then
+	echo "Error: STBHOST is not set! It should be the address to your box." >&2
+	exit 1
+    fi
+}
+
+function check_model
+{
+    if [ -z "${STBMODEL}" ]; then
+	echo "Error: STBMODEL is not set! It should be 19x3, vip19x3 or similar." >&2
+	exit 1
+    fi
+    model=${STBMODEL#vip}
+    model=${model#VIP}
+    $TOOLDIR/_getarch ${model} >/dev/null || exit 1
+}
+
+function check_nfspath
+{
+    if [ -z "${NFSPATH}" ]; then
+	echo "Error: NFSPATH is not set! NFSPATH should typically be /extra/nfs_filesystems/\$REMOTEUSER." >&2
+	exit 1
+    fi
+}
+
+function check_tftphost
+{
+    if [ -z "${TFTPHOST}" ]; then
+	echo "Error: TFTPHOST is not set!" >&2
+	exit 1
+    fi
+}
+
+function check_roothost
+{
+    if [ -z "${ROOTHOST}" ]; then
+	echo "Error: ROOTHOST is not set!" >&2
+	exit 1
+    fi
+}
+
+function print_help
+{
+   echo "Check presence and vailidity of environment variables." >&2
+   echo "Usage: $0 [-a] [-b] [-c] [-n] [-t] [-r]"  >&2 
+   echo "  -b  Check if BRANCH is set" >&2
+   echo "  -c  Check if CODEHOME is set" >&2
+   echo "  -m  Check if STBMODEL is present and valid." >&2
+   echo "  -n  Check if NFSPATH is set" >&2
+   echo "  -r  Check if ROOTHOST is set" >&2 
+   echo "  -t  Check if TFTPHOST is set" >&2
+   echo "Return value: 0 if success, non zero if failure" >&2
+}
+
+if [ $# -lt 1 ]; then 
+    print_help
+    exit 1
+fi
+
+if [ -n "${BOXARCH}" ]; then
+    echo "Warning: BOXARCH is deprecated, but is defined. Use STBMODEL instead."
+fi
+if [ -n "${STBARCH}" ]; then
+    echo "Warning: STBARCH is deprecated, but is defined. Use STBMODEL instead."
+fi
+
+for arg in $@; do
+    case $arg in
+	"-b")
+	    check_branch
+	    ;;
+	"-c")
+	    check_codehome
+	    ;;
+        "-h")
+            check_host
+            ;;
+	"-m")
+	    check_model
+	    ;;
+	"-n")
+	    check_nfspath
+	    ;;
+	"-r")
+	    check_roothost
+	    ;;
+	"-t")
+	    check_tftphost
+	    ;;
+	*)
+	    echo "Unknown argument ${arg}"
+	    exit 1
+	    ;;
+    esac
+done

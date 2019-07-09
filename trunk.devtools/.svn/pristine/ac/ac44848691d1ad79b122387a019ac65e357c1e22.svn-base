@@ -1,0 +1,71 @@
+#!/bin/bash
+# Unpacks the a rootdisk to $NFSPATH/<model>
+# Environment variables used:
+#   BRANCH, the name of the branch you are working on
+#   CODEHOME, the path to the branch you are working on, typically /extra/$USER/$BRANCH
+#   ROOTHOST, the host on which the root file system is located
+#   STBMODEL, The model to use (19x3, 28x3, 29x2...)
+#   NFSPATH, The path where your NFS rootdisks are, (usually /extra/nfs_filesystems/$REMOTEUSER)
+#   STBCONFIG, The bootimage configuration to use, default is "custom"
+#   STBHWMODEL, The toolchain name (e.g. bcm74xx, bcm15, bcm45 or st40).
+
+if [ -n "${BSG_BUILD_VERSION}" ]; then
+    VERSION=$(echo ${BSG_BUILD_VERSION} | sed 's/_/-/g')    
+else
+    VERSION=$(echo ${BRANCH} | sed 's/_/-/g')    
+fi
+
+TOOLDIR=$(dirname $(which $0))
+${TOOLDIR}/_checkenv -m -b -c -n -r || exit 1
+
+. ${TOOLDIR}/_fixmodel
+. ${TOOLDIR}/_setremoteuser
+
+stbconfig="$STBCONFIG"
+if [ -z $stbconfig ]; then
+    stbconfig="custom"
+fi
+
+if [ -e "$1" ]; then
+    ROOTDISK=$1
+fi
+
+# 3.x and 4.x bootimages has different naming standard:
+
+# 4.x style
+if [ -z $ROOTDISK ]; then
+    ROOTDISK=${CODEHOME}/${BRANCH}/dist/products/kreatv-rootdisk-${stbconfig}_INTERNAL-USE-ONLY_${VERSION}_${STBHWMODEL}_${model}.tgz
+fi
+
+if [ ! -e $ROOTDISK ]; then
+    # Try without INTERAL_USE_ONLY
+    echo "Info: Trying without INTERNAL-USE-ONLY"
+    ROOTDISK=${CODEHOME}/${BRANCH}/dist/products/kreatv-rootdisk-${stbconfig}_${VERSION}_${STBHWMODEL}_${model}.tgz
+fi
+
+if [ ! -e $ROOTDISK ]; then
+    # 3.x style
+    echo "Info: 4.x style rootdisk not found, trying with 3.x style"
+    ROOTDISK=${CODEHOME}/${BRANCH}/dist/products/kreat*-rootdisk-${stbconfig}_${VERSION}_${model}_${STBHWMODEL}.tgz
+fi
+
+if [ ! -e $ROOTDISK ]; then
+    echo "Error: Could not find any rootdisk to unpack"
+    exit 1
+fi
+
+if [ -z "$ROOTPATH" ]; then
+    ROOTPATH=${NFSPATH}/$model
+fi
+
+# Make sure the target directory exists
+ssh root@${ROOTHOST} "mkdir -p $ROOTPATH"
+
+if [ $? != 0 ]; then
+    echo "Could not access $ROOTPATH."
+    exit
+fi
+
+echo "Will uncompress rootdisk $ROOTDISK to $ROOTHOST:$ROOTPATH."
+
+echo "Removing old..." && ssh root@${ROOTHOST} "rm -rf $ROOTPATH/rootdisk/*" && echo "Uncompressing..." && cat ${ROOTDISK} | ssh root@${ROOTHOST} tar -C ${ROOTPATH} -zxpPf - && echo "Done."

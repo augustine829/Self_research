@@ -1,0 +1,2116 @@
+<!-- @location resources/other/makesystem.html -->
+<!-- @title makesystem -->
+
+makesystem
+==========
+
+This page contains information on how to use the KreaTV make system (AKA build
+system).
+
+<!-- @TOC -->
+
+
+General
+-------
+
+The make system is based on [GNU Make] and is located at [make/makesystem] on
+the SVN server. It's designed to be an `svn:externals` entry named `makesystem`
+in the top directory of the source tree.
+
+[GNU Make]: http://www.gnu.org/software/make/
+[make/makesystem]: http://svn.arrisi.com/dev/make/makesystem
+
+
+Concepts
+--------
+
+Some concepts are useful to know about before interpreting a Makefile:
+
+
+### Component ###
+
+A component is in this context defined as a directory that contains a Makefile
+that includes `common.mk` or `build.mk` from `makesystem`.
+
+The purpose of a component is to produce some output from the component's
+source files, possibly in combination with output from other components. The
+output from a component is made available for use by other components by
+"disting".
+
+
+### Leaf and non-leaf components ###
+
+* A __leaf component__ is a component that has no other components as
+  subdirectories.
+* A __non-leaf component__ is a component that has at least one component in a
+  subdirectory.
+
+Building things should always be done in leaf components. A non-leaf
+component's Makefile should be a symbolic link to
+`.../makesystem/internalnode.mk`.
+
+
+### Disting ###
+
+"Disting" (derived from "distributing") means copying files produced by a
+component into a directory called `dist`, which is located in the source tree
+top directory. This is the way to publish the result of building the component.
+The result could for instance be one or several libraries, executables,
+documentation packages, boot images, etc.
+
+There are some rules related to disting:
+
+* A file may only be copied to the `dist` directory by using the `dist_targets`
+  script. (This is normally done automatically by the makesystem when a
+  Makefile defines `*_TARGETS` variables.)
+* A disted file must only be copied to `dist` once.
+* A disted file must not be removed after having been disted.
+* A disted file must not be modified after having been disted.
+
+
+### Target ###
+
+The meaning of the word "target" is unfortunately a bit overloaded &mdash; it
+is used to describe several things:
+
+* A __Makefile target__ is generally __a file__ (or a pseudo-target, e.g.
+  `local_all`, which is a kind of alias for other targets) that may be
+  __produced by a build rule__ in the Makefile.
+* An entry in one of the __`*_TARGETS` variables__ is a Makefile target that is
+  specially handled in some way, for instance __disted__ into a suitable
+  subdirectory of `dist`. See [*_TARGETS variables]. below.
+* A __component target__ is one of the entries in the `COMPONENT_TARGETS`
+  variable, which specifies for which __toolchains__ and/or __devices__ the
+  component should be built. See [component targets] below.
+
+
+Example Makefile
+----------------
+
+    ### Requires these components
+
+    REQUIRES += some/component
+    REQUIRES += some/other/component
+
+    ### Component specification
+
+    COMPONENT_TARGETS += $(TARGET_NAME_STB)
+
+    ### Targets
+
+    bin_target   = $(TARGET_OBJS_DIR)/example
+    bin_srcs    += main.cpp
+    bin_srcs    += TExample1.cpp
+    bin_srcs    += TExample2.cpp
+    bin_objs     = $(addprefix $(TARGET_OBJS_DIR)/,$(bin_srcs:.cpp=.o))
+
+    SRCS        += $(bin_srcs)
+    BIN_TARGETS += $(bin_target)
+
+    unittest_target = $(TARGET_OBJS_DIR)/unittest
+    unittest_srcs  += TExample1.cpp
+    unittest_srcs  += TExample2.cpp
+    unittest_srcs  += unittests/main.cpp
+    unittest_srcs  += unittests/TestExample1.cpp
+    unittest_objs   = $(addprefix $(TARGET_OBJS_DIR)/,$(unittest_srcs:.cpp=.o))
+
+    SRCS           += $(unittest_srcs)
+    TEST_TARGETS   += $(unittest_target)
+
+    ### Export interface
+
+    INTERFACE_HEADERS = IExample.h
+    INTERFACE_PATH = example
+
+    ### common.mk
+
+    include ../../../makesystem/common.mk
+
+    ### Rules
+
+    CPPFLAGS += -DMYDEFINE=foo
+
+    $(bin_target): $(bin_objs)
+            $(LINK)
+
+    $(unittest_target): $(unittest_objs)
+            $(LINK)
+
+
+Anatomy of a Makefile
+---------------------
+
+### common.mk and constants.mk ###
+
+A Makefile must include `makesystem/common.mk` using a relative path.
+
+Most of the variables described in the rest of this document need to be set
+before including `common.mk`. However, in some cases, variables defined by
+`common.mk` are needed when using `ifeq` and similar conditionals that evaluate
+the variables immediately. In that case, you can include
+`makesystem/constants.mk` before using such variables.
+
+Here is an example where the value of `ST40_TOOLCHAIN_NAME` is needed before
+the inclusion of `common.mk`:
+
+    # ...
+
+    include ../makesystem/constants.mk
+
+    ifeq ($(TOOLCHAIN),$(ST40_TOOLCHAIN_NAME))
+      bin_srcs += frontpanelleds.c
+    else
+      bin_srcs += kboxleds.c
+    endif
+
+    SRCS += $(bin_srcs)
+
+    # ...
+
+    include ../makesystem/common.mk
+
+    # ...
+
+
+### Variable naming ###
+
+Names of variables that the make system handles in a predefined way are always
+in upper case. Use lower-case variable names without a leading underscore for
+local variables in the component's Makefile. (Variables internal to makesystem
+are lower-case and begin with an underscore.)
+
+
+### Requires ###
+
+The `REQUIRES` variable lists all other components that must be built before
+building this component. Note that it may be possible to build successfully
+even if some required components are missing in `REQUIRES`. There is currently
+no way to test that your requirements really fulfill the needs of your
+component. Also, you should remove unneeded requirements since they will
+potentially slow down the build process by not allowing full build
+parallelization.
+
+One component name is handled specially: `ALL_DIRS`. This special component
+must be specified as the single `REQUIRES` in non-leaf components. Leaf
+components must not require `ALL_DIRS`.
+
+
+### Component targets ###
+
+The variable `COMPONENT_TARGETS` lists the toolchains and/or devices for which
+the component should be built. It's often set to `$(TARGET_NAME_STB)`, which
+expands to all available IP-STB toolchain targets. When you need a special
+build for one or several devices, you can set `COMPONENT_TARGETS` to something
+more specific, for example `$(TARGET_NAME_VIP28X3)`.
+
+Each component target is associated with one toolchain and optionally one
+device:
+
+* A __toolchain__ specifies the compiler and other tools to use for the
+  architecture associated with the toolchain. Examples: `host` and `st40`. In
+  Makefiles, `$(TOOLCHAIN)` contains the current toolchain.
+* A __device__ specifies a specific STB or other hardware device. Examples:
+  `vip28x3` and `vip29x2`. In Makefiles, `$(DEVICE)` contains the current
+  device, or the empty string for toolchain-level targets.
+
+Available toolchain-level component targets:
+
+`TARGET_NAME_BCM15`
+: Build common binaries for all BCM15 targets.
+
+`TARGET_NAME_BCM45`
+: Build common binaries for all BCM45 targets.
+
+`TARGET_NAME_HOST`
+: Build for the host environment (unconditionally; see also
+  `TARGET_NAME_TEST`).
+
+`TARGET_NAME_NOARCH`
+: Build things that are not architecture-specific (e.g. documentation).
+
+`TARGET_NAME_ST40`
+: Build common binaries for all ST40 targets.
+
+`TARGET_NAME_ST9`
+: Build common binaries for all ST9 targets.
+
+`TARGET_NAME_STB`
+: Build for all IP-STB toolchains.
+
+`TARGET_NAME_STB_NOARCH`
+: Build generic (i.e., not architecture-specific) things that are used on the
+  STB. Examples are scripts, portals and architecture-independent IIPs. This
+  target is only built if at least one other STB target is enabled.
+
+`TARGET_NAME_TEST`
+: Build for the host environment, but only if `BUILD_TEST = true` in
+  `platforms.mk`. This target is a bit special: When building, `$(TARGET)` will
+  be `$(TARGET_NAME_HOST)`, `$(TOOLCHAIN)` will be `$(HOST_TOOLCHAIN_NAME)` and
+  `$(DEVICE)` will be empty.
+
+__Note__: `TARGET_NAME_TEST` is handled specially: it is an alias of
+`TARGET_NAME_HOST` but with different semantics when running tests and when
+performing [auto linking].
+
+__Note__: If a component is built for `TARGET_NAME_HOST`, all components it
+depends on must also be built for `TARGET_NAME_HOST` (i.e., `TARGET_NAME_TEST`
+is not enough!).
+
+Available device-level component targets:
+
+`TARGET_NAME_VIP28X3`
+: Build for the VIP28X3 IP-STB.
+
+`TARGET_NAME_VIP29X2`
+: Build for the VIP29X2 IP-STB.
+
+`TARGET_NAME_VIP35X0`
+: Build for the VIP35X0 IP-STB.
+
+`TARGET_NAME_VIP43X2`
+: Build for the VIP43X2 IP-STB.
+
+`TARGET_NAME_VIP43X3`
+: Build for the VIP43X3 IP-STB.
+
+`TARGET_NAME_VIP55X2`
+: Build for the VIP55X2 IP-STB.
+
+### Sources ###
+
+These variables are used to inform the makesystem about which source files are
+used:
+
+`SRCS`
+: A list of C or C++ source files used in the build.
+
+`MODULE_SRCS`
+: A list of C or C++ source files used when building a Linux kernel module.
+
+
+### `*_TARGETS` variables ###
+
+The purpose of a makefile is to build and dist something. This is done by
+adding makefile targets to one or several variables with a `_TARGETS` suffix.
+The table below lists available variables and their purpose.
+
+(`<dir>` in the paths below is the toolchain, plus a 3pp directory part (if the
+component is marked as third party), plus a device directory part (only for
+device-level component targets).
+
+__Note:__ These variables must be set (if set at all) in the beginning of the
+makefile, before inclusion of common.mk.
+
+`BIN_TARGETS`
+: Lists binaries to build, disted to `dist/<dir>/bin`.
+
+`CONFIG_TARGETS`
+: Lists configuration data files. This is typically files that are located in
+  `/etc` on the box, disted to `dist/config/$(CONFIG_PATH)`. If
+  `CONFIG_PRESERVE_SOURCE_DIR` is defined, the directory part of the listed
+  files will be preserved.
+
+`DOC_TARGETS`
+: Lists documentation files, disted to `dist/doc/$(DOC_PATH)/$(COMPONENT)`. If
+ `DOC_PRESERVE_SOURCE_DIR` is defined, the directory part of the listed files
+ will be preserved when installing.
+
+`HACK_TARGETS`
+: Lists targets that are never called by the makesystem but are useful when,
+  for example, building third party code while developing a patch. If this
+  variable is set, the makesystem will help by setting a target and flavour as
+  needed. As a default, the first active target in `COMPONENT_TARGETS` and the
+  first flavour in `FLAVOURS` is used. You may set `HACK_FLAVOUR` to change the
+  default flavour.
+
+`INTERFACE_HEADERS`
+: Lists header files, disted to `dist/<dir>/include/$(INTERFACE_PATH)`. Headers
+  are only installed per toolchain, not per target, so `<dir>` never includes
+  the device. If `INTERFACE_PRESERVE_SOURCE_DIR` is defined, the directory part
+  of the listed files will be preserved when installing.
+
+`INTERFACE_LIBS`
+: Lists libraries that should be linked by components when requiring this
+  component. See [auto linking] below.
+
+`JAVA_TARGETS`
+: Lists Java targets, disted to `dist/java`.
+
+`KATT_TARGETS`
+: Lists targets that will be disted to
+  `dist/kattregression/<target>/<component>`. __TODO__: Improve description.
+
+`KATTENV_TARGETS`
+: Lists targets that will be disted to `dist/kattenv`. __TODO__: Improve
+  description.
+
+`LIB_TARGETS`
+: Lists libraries to build. This can be both static and dynamic libraries,
+  disted to `dist/<dir>/lib`.
+
+`MOCKED_HEADERS`
+: Lists header files (not in `INTERFACE_HEADERS`) for which mocks should be
+  generated automatically. See [automatic mocks] below.
+
+`MOCKED_INTERFACE_HEADERS`
+: Lists header files (in `INTERFACE_HEADERS`) for which mocks should be
+  generated automatically. See [automatic mocks] below.
+
+`MODULE_TARGETS`
+: Lists kernel modules, disted to `dist/<dir>/bin/modules`.
+
+`NOARCH_TARGETS`
+: Lists generic architecture-independent targets that are guaranteed to be
+  built. No installation is made unless explicitly done in the makefile.
+
+`OTHER_TARGETS`
+: Lists generic, architecture-dependent targets that are guaranteed to be
+  built. No installation is made unless explicitly done in the makefile.
+
+`PRODUCT_TARGETS`
+: Lists products to build, disted to `dist/products`.
+
+`SCRIPT_TARGETS`
+: Lists scripts, disted to `dist/bin` (`dist/3pp/bin` for 3pps).
+
+`SETUP_TARGETS`
+: List targets that should be built before the build of binaries starts. This
+  is typically tarball unpacking, patching or automatic generation of source
+  code. These targets must be "no-arch", that is they may not depend on any of
+  the files in `dist/<dir>` or use any of the target-specific tools
+  (compilers). If the targets don't have to be built before the build of
+  binaries starts, use `NOARCH_TARGETS` instead.
+
+`TEST_TARGETS`
+: Lists targets that will be run automatically by the make system. See [unit
+  tests] below. Set to `$(empty)` if there are unit testable code in the
+  component, otherwise define `NOT_SUITABLE_FOR_UNIT_TESTS = true` instead.
+
+
+### Cleaning ###
+
+A cleanup is triggered automatically when `Makefile` has been modified since
+this is the only way (in make-based build systems) to make sure that any
+changes in build rules will have the intended effect. You can also perform
+cleanup manually by running `make local_clean`.
+
+The make system knows how to clean up files it generates itself, for instance
+`$(TARGET_OBJS_DIR)`, `$(SRC_DIR)`, `$(PRODUCT_TARGETS)`, generated IDL sources
+and various dot files. If you add custom rules for building files (for example
+to `SETUP_TARGETS`, `NOARCH_TARGETS` or `OTHER_TARGETS`), you should add the
+produced files (or file patterns) to the `CLEANUP_FILES` variable, which lists
+extra files/directories that should be removed when cleaning the component.
+
+
+### Other settings ###
+
+These variables must be set (if set at all) in the beginning of the makefile,
+before inclusion of common.mk.
+
+`COMPONENT_IS_3PP`
+: If defined, indicate that the component is a third party product. This
+  changes the way all build files are installed and also compiler flags and
+  similar.
+
+`FLAVOURS`
+: Set to a list of flavours. See [flavours] below.
+
+`*_FLAVOURS`
+: Set to a list of flavours. See [flavours] below.
+
+`KLOCWORK`
+: If defined, perform [Klocwork] code analysis after the build. The source
+  code that is compiled during that build will be analyzed.
+
+`MODULE_LINUX_FLAVOUR`
+: If defined, use as part of include path to linux kernel includes. E.g.
+  when building devices for a non-standard kernel such as the firmware
+  kernel, we need this to get the correct include path. Default value is
+  'linux'.
+
+`NEEDS_ABS_PATHS`
+: If defined, indicate that the build of this component does not work with
+  relative paths. This should only happen in 3pp code that uses its own
+  makesystem.
+
+`NOT_SUITABLE_FOR_UNIT_TESTS`
+: If defined, the component does not contain unit testable code. For
+  instance, interface components and test applications typically set this
+  variable. If the component *does* contain unit testable code but currently
+  has no unit tests, define `TEST_TARGETS = $(empty)` instead.
+
+`NO_AS_NEEDED`
+: If defined, disable the "as needed" linking mechanism. See [auto linking]
+  below.
+
+`NO_AUTO_FETCH_BREFS`
+: If defined, the makesystem will not automatically fetch binary files
+  corresponding to all `*.bref` files in the component. It will still be
+  possible to have the makesystem fetch specific binary files by explicitly
+  making them prerequisites of any make rule. See also [binary files].
+
+`NO_CCACHE`
+: If defined, indicate that this component doesn't work with [ccache]. You
+  should never set this. If you need to use it, there is a bug in ccache, your
+  makefile or in the makesystem. Please consider fixing this bug.
+
+`NO_COMPONENTCACHE`
+: If defined, indicate that the build of this component doesn't work with
+  the [component cache].
+
+`NO_STRIP`
+: If defined, disable stripping of binaries.
+
+`NO_SYMBOL_VISIBILITY_MACROS`
+: If defined, disables the automatic definition of ELF symbol
+  visibility related macros (as found in `makesystem/Visibility.h`)
+  when building non-3pp code.
+
+`PARALLEL_3PP`
+: If defined, indicate that it works to build the 3pp component in parallel
+  when calling a submake (the default is to not build 3pps in parallel).
+
+`PRODUCES_STANDALONE_BINARY`
+: If defined, the build flags will be set up to produce binaries without
+  references to the build tree and to use the system host toolchain without
+  compiler flags only understood by newer toolchains.
+  This setting is primarily used for tools that should be possible to run outside
+  the build tree on older systems.
+
+`USE_SYMBOL_VISIBILITY_HIDDEN`
+: If defined, hides symbols when building non-3pp code (the
+  default is to not hide symbols). When in effect all public
+  parts of an interface should be exported using the EXPORT macro (as
+  found in `makesystem/Visibility.h`). For more information see [GCC
+  symbol visibility].
+
+[ccache]: http://ccache.samba.org
+[component cache]: http://kreatvwiki.arrisi.com/KreaTV/ComponentCache
+[GCC symbol visibility]: http://gcc.gnu.org/wiki/Visibility
+[Klocwork]: http://kreatvwiki.arrisi.com/KreaTV/Klocwork
+
+### Compiler tweaks ###
+
+If you need to change some compiler flags or include paths, use the following
+variables:
+
+`CPPFLAGS`
+: Flags to the preprocessor (e.g. `-D`).
+
+`COMMON_FLAGS`
+: Flags to both C and C++ compilers.
+
+`CFLAGS`
+: Flags to the C compiler.
+
+`CXXFLAGS`
+: Flags to the C++ compiler.
+
+`DEBUG_FLAGS`
+: Flags controlling debug information. Default: `-g`.
+
+`JFLAGS`
+: Flags to the Java compiler.
+
+`LDFLAGS`
+: Flags to the compiler when linking.
+
+`LDLIBS`
+: Extra libraries to link with. Usage of this flag is normally not needed; see
+  [auto linking].
+
+`OPTIMIZATION_FLAGS`
+: Flags controlling optimization.
+
+`INCPATH`
+: Include path directives (`-I`). Normally these should be set up by the
+  makesystem, but there are exceptions.
+
+`LIBPATH`
+: Library include path directives (`-L`). Normally these should be set up by
+  the makesystem, but there are exceptions.
+
+They should be set after the inclusion of `common.mk`.
+
+
+### Linking ###
+
+Link commands must be specified explicitly to build executable binaries and
+libraries from object files. They are used like this:
+
+    $(target): $(objects)
+            $(LINK)
+
+`LINK`
+: Build an exectuable.
+
+`LINK_C`
+: Same as `LINK` but will use the C compiler for linking rather than using an
+  automatic selection of C or C++.
+
+`LINK_A`
+: Build archive (static library).
+
+`LINK_SO`
+: Build shared object (dynamic library).
+
+`LINK_JAR`
+: Build Java JAR archive file.
+
+`MODULE_LINK`
+: To build modules.
+
+
+### Auto linking ###
+
+The makesystem will automatically link required libraries as long as
+`INTERFACE_LIBS` variables are set correctly. Each component that dists a
+library should set `INTERFACE_LIBS` to the name of the library. All other
+components that `REQUIRES` the component will then automatically include the
+library when linking. If the disted library is a static library that needs
+other libraries at link time, the other libraries must also be added to
+`INTERFACE_LIBS` in the correct order.
+
+To make this work, `--as-needed` is automatically added to the linker command
+line. This tells the linker to only add `DT_NEEDED` entries for the shared
+libraries that actually contain at least one needed symbol. `DT_NEEDED` entries
+tell which libraries the runtime linker (`ld.so`) should load. Example: If we
+want to create `libX.so` and the code in in `libX.so` only refers to an
+external symbol `Y`, then if we link `libX.so` with `-lY` and `-lZ` (where
+`libY.so` publishes `Y`), then `libX.so` will have a dependency (i.e., a
+`DT_NEEDED` entry) only on `libY.so`, but not on `libZ.so`. This is normally
+good because it avoids unnecessary runtime dependencies.
+
+Setting `NO_AS_NEEDED` to true in the Makefile makes the link command use
+`--no-as-needed` instead, so `DT_NEEDED` entries are created for all libraries
+mentioned on the command line. If `NO_AS_NEEDED` would be set for the above
+example, both `libY.so` and `libZ.so` would have to be present on the root disk
+when loading `libX.so`, even though `libX.so` doesn't use any symbols from
+`libZ.so`.
+
+If `libX.so` (or a program using `libX.so`) looks up symbols dynamically with
+`dlopen` / `dlsym` (for instance when loading plugins), it could be that we
+explicitly want `libZ.so` to be loaded when `libX.so` is loaded so that `dlsym`
+is able to find symbols in `libZ.so`. This is one case where `NO_AS_NEEDED`
+could be used. (However, a plugin that wants to use symbols in `libZ.so` should
+normally link with `libZ.so` explicitly instead.)
+
+Example:
+
+    ...
+    LIB_TARGETS = $(TARGET_OBJS_DIR)/libfrobnik.a
+
+    INTERFACE_LIBS = frobnik
+    INTERFACE_LIBS += crc
+    INTERFACE_LIBS += common
+    ...
+
+`crc` and `common` have been added to `INTERFACE_LIBS` because `libfrobnik.a`
+is a static library that uses symbols from the `crc` and `common` libraries.
+
+__Note:__ The library will only be linked for the targets it is built for. For
+example, test tools like google mock will only be built for the test target and
+the libraries disted by google mock will only be linked to test targets even if
+the component requiring google mock probably is built for several other
+targets.
+
+In some rare cases it is necessary to force which targets a specific library is
+linked with by setting `INTERFACE_LIBS_<target>`, where `<target>` is the name
+of the target in the same form as in TARGET_NAME variables, e.g. `HOST`,
+`TEST`, `ST40` or `VIP28X3`.
+
+If a component for some reason wants to remove an automatically determined
+library from the linker flags, the Makefile can set `REMOVE_LIBS`:
+
+    # Remove -lfoo and -lbar from linking flags
+    REMOVE_LIBS = foo bar
+
+This should normally not be needed because of the `--as-needed` option as
+described above.
+
+
+Configuring the build
+---------------------
+
+The default is to build all component targets, but you may select a subset by
+running
+
+    make -C makesystem platforms.mk
+
+and editing the newly created `makesystem/platforms.mk`.
+
+
+Make goals
+----------
+
+When running make you can provide a goal target for the build:
+
+`all`
+: Build the current component and all components it requires. This includes
+  boot images and kits that normally only are built on demand.
+
+`clean`
+: Clean the current component and all components it requires.
+
+`local_all`
+: Build the current component.
+
+`local_clean`
+: Clean the current component.
+
+`most`
+: Build the current component and all components it requires except kits
+  and bootimages that normally only are built on demand, i.e. that have
+  `ALWAYS_BUILD` set to false.
+
+If no goal is provided the makesystem will default to the `all` goal.
+
+*Note*: When building from the top level of the code tree a goal must be
+explicitly specified. It is recommended to use the `most` goal when building
+from the top level since building with the `all` goal will take a very long
+time.
+
+
+More about component targets
+----------------------------
+
+Normally, a component is built for one or several __toolchains__, for instance
+`host`, `bcm45` or `st40`. This is accomplished by adding wanted toolchain(s)
+to `COMPONENT_TARGETS`:
+
+    COMPONENT_TARGETS += $(TARGET_NAME_BCM45)
+    COMPONENT_TARGETS += $(TARGET_NAME_ST40)
+
+There is a shortcut for specifying all STB toolchains:
+
+    COMPONENT_TARGETS += $(TARGET_NAME_STB)
+
+In the Makefile, `$(TARGET)` will contain the current component target,
+`$(TOOLCHAIN)` will contain the current toolchain and `$(DEVICE)` will contain
+the current device, if any. `$(TARGET_OBJS_DIR)` will include toolchain and
+device parts to make makefile target paths unique.
+
+If a component needs to be built separately for one or several devices, you can
+simply list all individual targets in `COMPONENT_TARGETS`. Example:
+
+    COMPONENT_TARGETS += $(TARGET_NAME_ST40)
+    COMPONENT_TARGETS += $(TARGET_NAME_VIP28X3)
+    COMPONENT_TARGETS += $(TARGET_NAME_VIP29X2)
+
+However, think twice (or more) before building for specific devices since it
+increases build time. It's often better to handle differences between different
+devices by use of configuration files, plugins, etc.
+
+
+### Flavours ###
+
+Flavours are subtargets that may be useful when building something with several
+configurations. For instance, the kernel is built twice for most devices: one
+with a debug configuration and one without debug code.
+
+This is set up by setting the `FLAVOURS` variable to the names of the desired
+flavours. In the makefile, `$(FLAVOUR)` will be set to the current flavour so
+that you can select correct settings for the flavour. `$(TARGET_OBJS_DIR)` will
+also contain `$(FLAVOUR)` to make makefile target paths unique. __Note__: You
+have to make sure that `$(FLAVOUR)` is part of the target paths that end up in
+`dist`, since there otherwise will be parallel build errors.
+
+It's also possible to use flavours only for specific component targets by
+setting `<target>_FLAVOURS`, for example `VIP29X2_FLAVOURS = flavour1
+flavour2`.
+
+Similar to hardware-specific component targets, you should think twice before
+using flavours since they (among other things) will increase build time. Use
+configuration files, plugins or similar if possible.
+
+
+What actually happens
+---------------------
+
+A key understanding that may be needed when writing or debugging more complex
+Makefiles is that the Makefile is interpreted _multiple times_ in different
+contexts.
+
+The first step is that the Makefile is read and _targets that are independent
+of the component target_ are built, which means:
+
+   * CONFIG_TARGETS
+   * DOC_TARGETS
+   * INTERFACE_HEADERS
+   * INTERFACE_MOCKS
+   * KATT_TARGETS
+   * NOARCH_TARGETS
+   * SCRIPT_TARGETS
+   * SETUP_TARGETS
+   * Generated RPC code
+
+In this step, `$(TARGET)`, `$(TOOLCHAIN)` and `$(DEVICE)` will be empty.
+
+As a second step, the _targets that depend on the component target_ are built
+once for each component target and flavour, possibly in parallel (if the `-j`
+option is used), using recursive make calls. In each such submake, the Makefile
+will be reinterpreted with `$(TARGET)`, `$(TOOLCHAIN)`, `$(DEVICE)` and
+`$(FLAVOUR)` variables set to the appropriate values. These are the targets
+that are built in the second step:
+
+   * BIN_TARGETS
+   * LIB_TARGETS
+   * JAVA_TARGETS
+   * MODULE_TARGETS
+   * OTHER_TARGETS
+   * TEST_TARGETS
+
+(An unfortunate side-effect of this is that it doesn't work to specify
+component target-dependent Makefile targets from the command-line. For example,
+running `make st40/myfile.o` will result in an error, since the target
+`st40/myfile.o` will be interpreted in the context of the first step, but make
+will not know how to build that target since `$(TARGET)` (and therefore
+`$(TARGET_OBJS_DIR)`) will not be set correctly. You can set `$(TARGET)`
+explicitly on the commandline to make it work, though.)
+
+Here are some illuminating examples of what actually happens:
+
+<!-- @class opaqueWhiteBackground -->
+<table>
+<tr><th>Makefile</th><th>Result of running <code>make local_all</code> with all
+platforms enabled in <code>platforms.mk</code></th></tr>
+
+<tr>
+<td><pre>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_NOARCH)</b>
+
+SETUP_TARGETS = my_setup_target
+OTHER_TARGETS = my_other_target
+
+include ../makesystem/common.mk
+
+info := $(TOOLCHAIN)/$(DEVICE)/$(FLAVOUR)
+
+my_setup_target:
+        echo Building my_setup_target for $(info)
+
+my_other_target:
+        echo Building my_other_target for $(info)
+</pre></td>
+
+<td><pre>
+Building my_setup_target for //
+  BUILD       example [noarch]
+Building my_other_target for noarch//
+</pre></td>
+</tr>
+
+<tr>
+<td><pre>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_STB)</b>
+
+SETUP_TARGETS = my_setup_target
+OTHER_TARGETS = my_other_target
+
+include ../makesystem/common.mk
+
+info := $(TOOLCHAIN)/$(DEVICE)/$(FLAVOUR)
+
+my_setup_target:
+        echo Building my_setup_target for $(info)
+
+my_other_target:
+        echo Building my_other_target for $(info)
+</td></pre>
+
+<td><pre>
+Building my_setup_target for //
+  BUILD       example [bcm15]
+Building my_setup_target for bcm15//
+  BUILD       example [bcm45]
+Building my_setup_target for bcm45//
+  BUILD       example [st40]
+Building my_other_target for st40//
+  BUILD       example [st9]
+Building my_other_target for st9//
+  BUILD       example [host]
+Building my_other_target for host//
+</pre></td>
+</tr>
+
+<tr>
+<td><pre>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_ST40)</b>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_VIP29X2)</b>
+
+SETUP_TARGETS = my_setup_target
+OTHER_TARGETS = my_other_target
+
+include ../makesystem/common.mk
+
+info := $(TOOLCHAIN)/$(DEVICE)/$(FLAVOUR)
+
+my_setup_target:
+        echo Building my_setup_target for $(info)
+
+my_other_target:
+        echo Building my_other_target for $(info)
+</td></pre>
+
+<td><pre>
+Building my_setup_target for //
+  BUILD       example [st40]
+Building my_other_target for st40//
+  BUILD       example [vip29x2]
+Building my_other_target for bcm45/vip29x2/
+</pre></td>
+</tr>
+
+<tr>
+<td><pre>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_STB)</b>
+<b>FLAVOURS = vanilla chocolate</b>
+
+SETUP_TARGETS = my_setup_target
+OTHER_TARGETS = my_other_target
+
+include ../makesystem/common.mk
+
+info := $(TOOLCHAIN)/$(DEVICE)/$(FLAVOUR)
+
+my_setup_target:
+        echo Building my_setup_target for $(info)
+
+my_other_target:
+        echo Building my_other_target for $(info)
+</td></pre>
+
+<td><pre>
+Building my_setup_target for //
+  BUILD       example [bcm15/vanilla]
+Building my_other_target for bcm15//vanilla
+  BUILD       example [bcm15/chocolate]
+Building my_other_target for bcm15//chocolate
+  BUILD       example [bcm45/vanilla]
+Building my_other_target for bcm45//vanilla
+  BUILD       example [bcm45/chocolate]
+Building my_other_target for bcm45//chocolate
+  BUILD       example [st40/vanilla]
+Building my_other_target for st40//vanilla
+  BUILD       example [st40/chocolate]
+Building my_other_target for st40//chocolate
+  BUILD       example [st9/vanilla]
+Building my_other_target for st9//vanilla
+  BUILD       example [st9/chocolate]
+Building my_other_target for st9//chocolate
+  BUILD       example [host/vanilla]
+Building my_other_target for host//vanilla
+  BUILD       example [host/chocolate]
+Building my_other_target for host//chocolate
+</pre></td>
+</tr>
+
+<tr>
+<td><pre>
+COMPONENT_TARGETS += <b>$(TARGET_NAME_VIP28X3)</b>
+<b>FLAVOURS = vanilla chocolate</b>
+
+SETUP_TARGETS = my_setup_target
+OTHER_TARGETS = my_other_target
+
+include ../makesystem/common.mk
+
+info := $(TOOLCHAIN)/$(DEVICE)/$(FLAVOUR)
+
+my_setup_target:
+        echo Building my_setup_target for $(info)
+
+my_other_target:
+        echo Building my_other_target for $(info)
+</td></pre>
+
+<td><pre>
+Building my_setup_target for //
+  BUILD       example [st40/vip28x3/vanilla]
+Building my_other_target for st40/vip28x3/vanilla
+  BUILD       example [st40/vip28x3/chocolate]
+Building my_other_target for st40/vip28x3/chocolate
+</pre><td>
+</tr>
+
+</table>
+
+
+Single Compilation Unit
+-----------------------
+
+Single Compilation Unit (SCU) is a feature that, when enabled, creates a
+"superfile" which includes all "real" source files of the component and
+compiles that as one single object file instead of one object file per source
+file. This gives the compiler some more possibilities for optimization,
+especially to remove unneeded and duplicated parts.
+
+To enable it, use the macro `ENABLE_SCU` like this:
+
+    $(eval $(call ENABLE_SCU,<srcs_var_name>,<objs_var_name>))
+
+This will automaticlly create the superfile and it will reset `<objs_var_name>`
+to be the new appropriate target.
+
+There are also negative sides to enabling the feature. For one, if you change
+anything, you need to recompile the superfile, which is slower than compiling
+just the changed source file. The superfile may also get large, so the compiler
+process can take a lot of memory, so on computers with little free memory the
+compilation may be a bit slower (but it's usually faster if you have enough
+memory). If you are developing something in an affected component and find that
+you want to recompile a lot and it takes long, you can disable SCU for the
+compilation by defining the environment variable NO_SCU, like this:
+
+    NO_SCU=1 make local_all
+
+
+Automatic mocks
+---------------
+
+Google Mocks can be generated automatically by setting `MOCKED_HEADERS` and/or
+`MOCKED_INTERFACE_HEADERS` to a list of header files containing interfaces for
+which mocks should be generated. Example:
+
+    INTERFACE_HEADERS += IFoo.h
+
+    MOCKED_INTERFACE_HEADERS += IFoo.h
+    MOCKED_HEADERS += IFie.h TFum.h
+
+This will generate Google Mock mocks from the interface classes in `IFoo.h`,
+`IFie.h` and `TFum.h` (`TMockFoo.h`, `TMockFie.h` and `TMockFum.h`,
+respectively). `TMockFoo.h` will be disted because it is added to
+`MOCKED_INTERFACE_HEADERS`, but the other mocks will not.
+
+Object files for the local mocks are available in the `MOCK_OBJS` variable.
+
+
+Global settings
+---------------
+
+There are a few settings available that can be used to globally tweak the build
+from the command line:
+
+`NO_CCACHE`
+: If defined, ccache won't be used. You should never set this. If you need to
+  use it, there is a bug in ccache, your makefile or in the makesystem. Please
+  consider fixing this bug.
+
+`NO_COMPONENTCACHE`
+: If defined, the [component cache] will not be used.
+
+`NO_HARDENING`
+: If defined, disable compiler options for buffer overflow detection and stack
+  protection, which by default are enabled for the host toolchain.
+
+`NO_SCU`
+: If defined, disable the use of [Single Compilation Unit].
+
+`NO_TESTS`
+: If defined, no test targets will be run.
+
+`USE_EXTRA_DEBUG`
+: If defined, `_GLIBCXX_DEBUG` will be defined for all components
+  and `USE_HARDENING` will be defined implicitly.
+  For more information about libstdc++ debug mode, see [libstdc++ debug mode].
+  In short, this will enable runtime checking of incorrect usage of
+  libstdc++ features and abort the process when an error is detected.
+
+`NO_DEBUG_LOGGING`
+: If defined, all debug logging code and debug logging strings are pruned from binaries.
+  A build with this setting defined is something that a CA vendor could be interested in.
+
+`USE_FULL_SANDBOX`
+: If defined, enable sandboxing of all files. See [sandboxing] for more
+  information.
+
+`USE_GCOV`
+: If defined, `gcov` is used for unit tests to produce code coverage
+  information.
+
+`USE_HARDENING`
+: If defined, enable compiler options for buffer overflow detection and stack
+  protection for all toolchains that support it. Note that this comes with a
+  minor runtime cost, which is why it is only enabled for the host toolchain by
+  default.
+
+`USE_NETNS`
+: If defined, unit tests are run in a separate network namespace with only the
+  loopback interface available.
+
+`USE_SANDBOX`
+: If defined, enable sandboxing of libraries (enabled by default for 3pp
+  components). See [sandboxing] for more information.
+
+`USE_SANITIZE`
+: If defined, builds non-3pp code with AddressSanitizer and
+  UndefinedBehaviorSanitizer enabled. Only enabled for toolchains with GCC >=
+  4.8 (4.9 for UndefinedBehaviorSanitizer). For more information see
+  [GCC debugging options].
+
+`USE_SYSTEM_TOOLCHAIN_FOR_HOST`
+: If defined, the system installed toolchain will be used instead of the KreaTV
+  host toolchain.
+
+`USE_VALGRIND`
+: If defined, unit tests are run under [Valgrind]. A suppression file can be
+  pointed out by setting the kbs:valgrind_suppression property in the root
+  directory of the build tree. Some information about writing suppressions can
+  be found here: [suppressions]
+
+`V`
+: Same as `VERBOSE`.
+
+`VERBOSE`
+: If defined, all executed commands will be printed in full. Useful when
+  debugging makefiles. It will also display output from the unit tests even if
+  no unit tests are failing..
+
+As mentioned above, you can use `platforms.mk` to select which component
+targets to build for. In some cases it may also be useful to specify a certain
+target or flavour in a specific make invocation; this is fully supported by the
+makesystem:
+
+    make local_all TARGET=vip28X3 FLAVOUR=banana
+
+[valgrind]: http://valgrind.org
+[suppressions]: http://wiki.wxwidgets.org/Valgrind_Suppression_File_Howto
+[GCC debugging options]: http://gcc.gnu.org/onlinedocs/gcc/Debugging-Options.html
+[libstdc++ debug mode]: https://gcc.gnu.org/onlinedocs/libstdc++/manual/debug_mode.html
+
+Building 3pps
+-------------
+
+A third party component usually consists of a source tarball and a set of
+patches. The patches are handled using [Quilt].
+
+A 3pp makefile should typically contain something like this:
+
+    COMPONENT_TARGETS += $(TARGET_NAME_STB)
+    COMPONENT_IS_3PP = true
+
+    SRC_ARCHIVE = my3pp-1.0.tar.gz
+    SRC_DIR     = my3pp-1.0
+    CREATE_SRC_BASE = true     # Optional; see below
+    USE_QUILT_GUARDS = true    # Optional; see below
+    PATCHES     = patches
+
+    SETUP_TARGETS += $(SRC_DIR)/.done
+    BIN_TARGETS += $(TARGET_OBJS_DIR)/bin/my3pp
+
+    include ../makesystem/common.mk
+
+    $(SRC_DIR)/.done: $(SRC_ARCHIVE) $(PATCHES_DEP)
+            $(UNPACK_SRC_ARCHIVE)
+            $(APPLY_PATCHES)
+            $(Q)touch $@
+
+    $(BIN_TARGETS): $(SRC_DIR)/.done
+            $(Q)$(BSG_DEVSETUP) $(MAKE) -C $(SRC_DIR) DESTDIR=$(CURDIR)/$(TARGET_OBJS_DIR)
+
+There are a number of subtle details handled by the above makefile snippet:
+
+* The `PATCHES_DEP` dependency will make sure that everything is rebuilt if
+  anything is changed in a patch or in the `patches/series` file (i.e., a patch
+  was removed). Of course, there is also a dependency on the source archive so
+  that everything is rebuilt if the source is changed.
+* The `UNPACK_SRC_ARCHIVE` macro will make sure to move the old `SRC_DIR` to a
+  backup location. If the old source archive is left, some patches may fail.
+  The backups are removed when doing `local_clean`.
+* The `APPLY_PATCHES` macro will fail if any of the patches do not apply.
+* The binary targets depend on a marker file created when the source archive is
+  unpacked and patched. It's a common mistake to depend on `SRC_DIR` itself or
+  some file in the archive, because when doing parallel builds, `SRC_DIR` and
+  files in the archive will exist before the entire archive is unpacked and
+  this will result in errors.
+* If `CREATE_SRC_BASE` is set, then `SRC_DIR` will be created and `SRC_ARCHIVE`
+  will be unpacked into `SRC_DIR`. If `CREATE_SRC_BASE` is not set,
+  `SRC_ARCHIVE` will unpacked directly in the component directory.
+* If `USE_QUILT_GUARDS` is set then
+  [Quilt guards](http://manpages.ubuntu.com/manpages/utopic/man1/guards.1.html)
+  can be used in the series files to apply patches conditionally on toolchain,
+  device and/or flavour. Available guards are `TOOLCHAIN_<toolchain>`,
+  `DEVICE_<device>` and `FLAVOUR_<flavour>`.
+
+[quilt]: http://kreatvwiki.arrisi.com/KreaTV/Quilt
+
+
+Echoing of executed commands
+----------------------------
+
+When building a non-3pp component, the make flag `-s` is automatically added by
+the make system. This means that executed commands are not printed, which is
+normally what you want since the make system tells you what it does in a nicer
+way (it prints which files are being compiled and linked, etc). If you want to
+trouble-shoot or debug a Makefile, you can set the variable `V` or `VERBOSE` to
+see all executed commands in full.
+
+When building a 3pp component, `-s` is _not_ added since the make system
+doesn't know what the 3pp's own makesystem does, and it's therefore of more
+interest to print the executed commands to get some progress messages.
+
+To make the behaviour described above work well, please follow the following
+guidelines:
+
+* In non-3pp components, never use a `@` prefix before commands since it makes
+  it impossible to get printouts of executed commands when you set `VERBOSE`.
+  Furthermore, it doesn't gain anything to use `@` since `-s` already silences
+  the printing of executed commands.
+* In 3pp components, you should use `$(Q)` (instead of `@`) as the prefix
+  before commands if you want to silence the printing of some executed command.
+  `$(Q)` expands to `@` when `VERBOSE` is not set and to the empty string when
+  `VERBOSE` is set.
+
+
+Unit tests
+----------
+
+Binaries specified in the `TEST_TARGETS` target will be run automatically by
+the make system. If a test fails, its output will displayed. Building of tests
+can be disabled by modifing `platforms.mk` as explained above. All tests are
+built for host, and if another component is required to dist libraries, those
+components must be built for the test target `TARGET_NAME_TEST`.
+
+
+Binary files
+------------
+
+It is possible, and recommended, to let the make system fetch binary files from
+a binary files server so that binary files don't have to be committed to the
+version control system. The binary files are fetched seamlessly by the make
+system. The files are also cached locally (by default in
+`/extra/binfilecache`), so you typically only need to download a specific file
+from the server once.
+
+
+### How it works ###
+
+The make system looks for files named `*.bref`, which are placeholders for the
+real binary files. For instance, a file named `myarchive.tgz.bref` tells the
+make system that it should fetch a file named `myarchive.tgz`. A `*.bref` file
+contains a SHA1 hash sum and some other information. By reading the hash, the
+make system knows how to download (or copy from the local cache) the correct
+version of the file.
+
+By default, the make system automatically fetches all binary files
+corresponding to `*.bref` files in the component. If this is not wanted, set
+`NO_AUTO_FETCH_BREFS` to true in the Makefile before including `common.mk`. It
+will still be possible to have the makesystem fetch specific binary files by
+explicitly making them prerequisites of any make rule.
+
+
+### Uploading ###
+
+To upload a new binary file (or several files) to the binary files server, run
+this command:
+
+    $(make getvar-MAKESYSTEM)/binary_file upload <file> [file ...]
+
+The `binary_file` script will then upload the file, create a suitable `.bref`
+placeholder with the correct hash sum and finally add the `.bref` to SVN.
+
+
+### Mirrors ###
+
+It's possible to set up binary files mirror servers (for download, not upload).
+The `$BINFILE_MIRROR` and `$SVNMIRROR` environment variables are read and used
+(if set) for this purpose.
+
+
+### Proxy ###
+
+You can set the `$BINFILE_PROXY` environment variable to select an HTTP proxy
+to use when downloading/uploading.
+
+
+### Alternative binary repository ###
+
+It is possible to use an alternative repository if you want to store very big
+files that are not for building the bsg project.
+
+To use the alternative repository, set the property `kbs:binfile_server` on the
+root directory to the hostname of the server.
+
+
+### Local cache directory ###
+
+The local directory used to cache downloaded files is `/extra/binfilecache` by
+default. You can override it by setting the `BINFILE_DIR` environment variable
+to a directory of your choice.
+
+
+### Offline mode ###
+
+Optional: You can run `make init` in the root of the source tree to prepopulate
+it with binaries. This will not build the tree.
+
+
+Binary files for Makefiles not using makesystem
+-----------------------------------------------
+
+It is possible to make use of `*.bref` files and the binary files server even
+if your Makefile doesn't use other parts of makesystem. Quick instructions:
+
+* Add `makesystem` to your source code tree as an `svn:externals` entry.
+* Add `include makesystem/bref.mk` to your Makefile somewhere after the first
+  default target.
+* Optionally set `BREF_DIRS` before including `bref.mk`. This variable
+  specifies the directories containing your `*.bref` files (default is the
+  current working directory).
+* Upload files by running `makesystem/binary_file upload <file> [file ...]`.
+* For each binary file, depend on the stamp file returned by `$(call
+  BREF_STAMP, x)`, where `x` is the path to the file. Alternative: If it's OK
+  to depend on all binary files, you can depend on `$(ALL_BREF_STAMPS)`
+  instead.
+* Optionally, use the command returned by `$(BREF_CLEAN)` in a cleanup rule.
+
+Example: Say that you have uploaded `archive.tar.gz` and that you now only have
+a `archive.tar.gz.bref` file left. This is what your Makefile could look like:
+
+    all: some_file_to_build
+
+    archive = archive.tar.gz
+    archive_stamp = $(call BREF_STAMP, $(archive))
+
+    include makesystem/bref.mk
+
+    some_file_to_build: $(archive_stamp)
+            tar xf $(archive)
+            ...
+
+    clean:
+            rm -f some_file_to_build
+            $(BREF_CLEAN)
+
+Example using `$(ALL_BREF_STAMPS)`:
+
+    all: some_file_to_build
+
+    archive = archive.tar.gz
+
+    include makesystem/bref.mk
+
+    some_file_to_build: $(ALL_BREF_STAMPS)
+            tar xf $(archive)
+            ...
+
+    clean:
+            rm -f some_file_to_build
+            $(BREF_CLEAN)
+
+
+Makefile checklist
+------------------
+
+Before committing a new makefile, please check the following:
+
+* Everything should of course build without errors. Preferably, you should not
+  build anything but the things you really need. This to avoid wasting time and
+  space.
+* You should be able to build in parallel (with the `-j` flag). Parallel builds
+  are turned off for 3pps by default, but it's encouraged to enable parallel
+  building of 3pps if possible. If your build fails when building in parallel,
+  there is something wrong with your makefile.
+* Make sure your component rebuilds and installs to dist on all possible
+  changes. In all cases, your build must produce that same result on any change
+  as it does on a clean build. You need to check that there are dependencies on
+  all files included in the component. If you are uncertain about some files,
+  just touch them and then rebuild and verify that everything works.
+* If you rebuild when there are no changes, nothing should happen.
+* Make sure that `make local_clean` really removes all files generated by the
+  build. (Add generated files to `CLEANUP_FILES`.)
+* Make sure you have correct REQUIRES set up. You should be able to run make
+  in your new component in an unbuilt tree where all targets but one are
+  disabled.
+
+
+Debugging
+---------
+
+Here are some tips that may be useful when debugging a Makefile.
+
+You can print messages and variable values by using `$(warning ...)`. Example:
+
+    $(warning TOOLCHAIN is now $(TOOLCHAIN))
+
+You can also print the value of a makefile variable from the command line by
+using `make getvar-<variable>`. Note that the command is run in the
+_architecture-independent_ context; see [What actually happens] above.
+
+
+Sandboxing
+----------
+
+Normally, all libraries put in `dist` will be available when linking a library
+or binary in a component. This means that a component could build correctly
+most of the times even if it has no requires on the component that publishes
+the library, which makes it hard to spot that something is wrong. Another
+consequence is that configure scripts of 3pp components may pick up libraries
+they should not see and therefore enable features that should not be enabled.
+
+The sandboxing feature of the makesystem is a way of limiting visibility of
+libraries to only those actually disted by a component's required components.
+Since sandboxing comes with a slight performance cost, it is by default only
+enabled for 3pp components. To enable it for all components, define
+`USE_SANDBOX`. It is also possible to sandbox all files, not only libraries, by
+defining `USE_FULL_SANDBOX`.
+
+
+Linking problems FAQ
+--------------------
+
+Check each of these points in order if you have link problems:
+
+* If you are using the library directly, make sure you require it. That is,
+  add:
+
+        REQUIRES += <component>
+
+    to your `Makefile` where `<component>` is the name of the component that
+    dists the library. Note that if you are missing the needed `REQUIRES`, you
+    might get an error even though the library is present in the dist
+    directory. This is due to the [sandboxing] mechanism.
+
+* Check that the correct `COMPONENT_TARGETS` are set in the component that
+  dists the library. For example, if you are building a unit test, the
+  libraries you are linking with must have `TARGET_NAME_TEST` in
+  `COMPONENT_TARGETS`.
+
+* If you get a link error similar to the one below, make sure that
+  `INTERFACE_LIBS += bar` is set after `INTERFACE_LIBS += foo`. This should be
+  done in the component that you required that caused foo to be added to your
+  link.
+
+          LINK        x
+        gcc ...
+        dist/libfoo.a: In function `foo-function':
+        x.c: undefined reference to `bar-function'
+
+* If some shared library `libfoo.so` uses some other shared library
+  `libbar.so`, and the linker is missing `libbar.so` even though it is included
+  in the link command, it means that `libfoo.so` is missing a direct link with
+  `libbar.so`. That is, when `libfoo.so` is built, the command must include
+  `-lbar`. If `libfoo.so` is a 3pp, a patch is probably required to fix it. If
+  you are unable to write such a patch, you can add `NO_AS_NEEDED = true` to
+  avoid the linking problem, but make sure to comment why you did this.
+
+Some other random points:
+
+* __Do not__ add makesystem-handled libraries with `LDFLAGS` or explicit `-l`
+  flags after `$(LINK)`. Instead, add `REQUIRES` and `INTERFACE_LIBS`.
+
+* __Do not__ try to remove libraries from linking with `filter-out` or similar.
+  Instead, check `INTERFACE_LIBS` and `COMPONENT_TARGETS` in the disting
+  component. If you still need to remove a library, use `REMOVE_LIBS`. This
+  should very rarely be needed.
+
+* __Do not__ try to change the order of requires to fix problems with linking
+  order. Change the order of `INTERFACE_LIBS` instead.
+
+* If you are linking with a library with C functions, don't forget that you
+  must wrap the declarations of the functions in the library with `extern "C"`
+  when including in a C++ program.
+
+* The program `nm` is very useful for checking which functions a library is
+  exporting. Useful options are `-C` to do C++ demangling and `-D` when using
+  with a dynamic/shared library.
+
+
+Macros for common build tasks
+-----------------------------
+
+The optional `build.mk` supports building of binaries, shared or static
+libraries, IIPs and documentation parts with a minimum of setup code.
+
+The `build.mk` makefile includes `common.mk` and is thus fully compatible with
+all functions and variables available in `common.mk`. Of course, some of the
+variables will also be set by the `build.mk` macros.
+
+If unit test sources are given, the test is built and run. All other sources
+are also included in this build except `main.cpp`.
+
+Wildcards are supported where applicable.
+
+Below are some examples on how to use `build.mk`
+
+
+### Build binary ###
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += <targets>
+
+    BUILD_BIN = myprogram
+    BUILD_BIN_SRCS = *.cpp
+
+    BUILD_TEST_SRCS = unittests/*.cpp
+    BUILD_TEST_EXCLUDE = badcode.cpp
+
+    <other things normally set before common.mk>
+
+    include ../../../makesystem/build.mk
+
+    <extra rules>
+
+
+### Build library ###
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += <targets>
+
+    BUILD_LIB_A = mylib
+    BUILD_LIB_SRCS = *.cpp
+
+    INTERFACE_HEADERS += *.h
+    INTERFACE_PATH = mylibstuff
+    INTERFACE_LIBS = mylib
+
+    BUILD_TEST_SRCS = unittests/*.cpp
+
+    CPPFLAGS += -DMYDEF
+
+    include ../../../makesystem/build.mk
+
+Replace `BUILD_LIB_A` with `BUILD_LIB_SO` to build a dynamic library. Set
+`BUILD_LIB_VER` to a version script if needed.
+
+
+### Build multiple binaries ###
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += <targets>
+
+    BUILD_BINS = myprogram1 myprogram2
+    BUILD_BIN_SRCS_myprogram1 = myprogram1.cpp
+    BUILD_BIN_SRCS_myprogram2 = myprogram2.cpp
+
+    BUILD_TEST_SRCS = unittests/*.cpp
+
+    include ../../../makesystem/build.mk
+
+
+### Build multiple libraries ###
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += <targets>
+
+    BUILD_LIBS_SO = mylib1 mylib2
+    BUILD_LIB_SRCS_mylib1 = mylib1.cpp
+    BUILD_LIB_SRCS_mylib2 = mylib2.cpp
+
+    BUILD_TEST_SRCS = unittests/*.cpp
+
+    include ../../../makesystem/build.mk
+
+`BUILD_LIBS_A` works in the same way.
+
+
+### Linking with local shared library ###
+
+`$(BUILD_BIN_TARGET)[_<target>]`, `$(BUILD_LIB_A_TARGET)[_<target>]`,
+`$(BUILD_LIB_SO_TARGET)[_<target>]` and `$(BUILD_TEST_TARGET)` contain the
+locations of the resulting binaries and libaries. They can be used after
+including `build.mk` to add a local shared library as a prerequisite of a local
+binary or shared library, which as a side effect will make the local binary or
+shared library link with the prerequisite. Example:
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += <targets>
+
+    BUILD_BIN = myprogram
+    BUILD_BIN_SRCS = myprogram.cpp
+
+    BUILD_LIBS_SO = mylib1 mylib2
+    BUILD_LIB_SRCS_mylib1 = mylib1.cpp
+    BUILD_LIB_SRCS_mylib2 = mylib2.cpp
+
+    include ../../../makesystem/build.mk
+
+    # Link myprogram with libmylib1.so:
+    $(BUILD_BIN_TARGET): $(BUILD_LIB_SO_TARGET_mylib1)
+
+### Build toiweb plugin ###
+The makesystem supplies an easy way to help to create a toiweb plugin
+from IDLs. A Makefile which is used to create a toiweb plugin could
+look like this:
+
+    REQUIRES += <requires>
+
+    COMPONENT_TARGETS += $(TARGET_NAME_STB)
+
+    TOI_COMPONENT = TeiDial
+
+    TOI_IDL_DIR = $(TOIWEB_JS_IDL_PATH)/dial
+
+    TOIWEB_PLUGIN_IDLS = ITeiDialService.idl ITeiDialObserver.idl
+
+    TOIWEB_PLUGIN = dial
+
+    include ../../../../../makesystem/toiweb.mk
+
+* `TOI_COMPONENT` should be set to the same value as `TOI_COMPONENT` in the
+  Makefile in the corresponding `tei`/`toi` component.
+* `TOI_IDL_DIR` specifies where to find IDLs generated by the corresponding
+  `tei`/`toi` component and should typically be set to
+  `$(TOIWEB_JS_IDL_PATH)/X`, where `X` is `TOI_EXPORT_PATH` from said component.
+* `TOIWEB_PLUGIN_IDLS` specifies the interfaces to be included in the plugin.
+* `TOIWEB_PLUGIN` specifies the name of the plugin.
+
+The resulting plugin will be named `libtoiweb_$(TOIWEB_PLUGIN)_plugin.so`.
+
+### Build IIP ###
+
+    REQUIRES += bootimage/iip
+
+    COMPONENT_TARGETS += $(TARGET_NAME_STB_NOARCH)
+
+    IIP_DEPENDS += kreatv-platform
+
+    BUILD_IIP = kreatv-option-myiip
+    BUILD_IIP_DESCRIPTION = description.xml
+    BUILD_IIP_KIT_INSTALL = kit_install.sh
+    BUILD_IIP_DIST = dist
+
+    include ../../../../makesystem/build.mk
+
+The following settings are available:
+
+`IIP_DEPENDS`
+: List of IIPs on which the IIP depends. There are three types of dependencies;
+  the rootdisk (default), finalize and kit. The default type causes the dependency
+  to be installed before the dependent IIP. The finalize type will cause the
+  dependency to be installed as a finalizer. The finalizers are installed
+  after all non-finalizers. The kit type is like the rootdisk type but the
+  dependency will only be included when building kits and ignored when building
+  boot images. To override the default dependency type, prefix the name of the
+  IIP depended upon with `<type>:`. E.g. `IIP_DEPENDS += finalize:kreatv-finalize-harddrive`
+  and `IIP_DEPENDS += kit:kreatv-doc-toi3`.
+
+`BUILD_IIP_CAPABILITIES`
+: List of provided capabilities.
+
+`BUILD_IIP_CONTENT_VERSION`
+: Content version.
+
+`BUILD_IIP_INSTALL`
+: Buildtime install script. Use `$(DIST_DIR)/bin/copy_data_to_rootdisk` to
+  simply install the files previosly disted by the `BUILD_IIP_DIST` script to
+  the rootdisk, or write a custom script if another behavior is needed.
+
+`BUILD_IIP_KIT_INSTALL`
+: Kit install script. If the IIP is a boot image IIP then the most common
+  behavior is to simply install the IIP in the products directory of the
+  kit. For this purpose, use the `$(DIST_DIR)/bin/default_kit_install`.
+  Similar to the `copy_data_to_rootdisk` script, mentioned above, there is a
+  `$(DIST_DIR)/bin/copy_data_to_kit` which will install all packaged
+  directories and files to the kit. There is also the option of using a custom
+  script if another behavior is needed.
+
+`BUILD_IIP_INTERNAL_USE_ONLY`
+: True for internal use only IIP.
+
+`BUILD_IIP_SOURCE`
+: Dist script source directory, default is `$(DIST_DIR)`.
+
+`BUILD_IIP_VARS`
+: Variables for dist script, set as a list of `<var>=<value>`.
+
+For convenience, the following dist variables are set by default (if
+applicable):
+
+    curdir=<cwd; usually $(COMPONENT_ROOT)>
+    config=$(DIST_DIR)/config
+    device=$(DEVICE)
+    dist=$(DIST_DIR)
+    dist_dir=$(DIST_DIR)
+    scripts=$(DIST_DIR)/bin
+    sysroot=<current sysroot>
+    toolchain=$(TOOLCHAIN)
+    toolchaindevice=$(TOOLCHAIN)/$(DEVICE)
+
+
+#### Build IIP using data build directory ####
+
+The following is an example of an IIP configured to build using a data
+build directory. It will produce an IIP which installs itself into a kit
+using the `copy_data_to_kit` script. The `copy_data_to_kit` script will
+copy contents equal to that of the data build directory into the kit
+using the same relative paths.
+
+    REQUIRES += bootimage/iip
+
+    COMPONENT_TARGETS += $(TARGET_NAME_NOARCH)
+
+    BUILD_IIP = kreatv-kit-myiip
+    BUILD_IIP_DIST = $(empty)
+    BUILD_IIP_KIT_INSTALL = $(DIST_DIR)/bin/copy_data_to_kit
+    BUILD_IIP_DESCRIPTION = description.xml
+    BUILD_IIP_DATA_BUILD_DIR_ENABLED = true
+
+    install_into_build = $(TARGET_OBJS_DIR)/.install_into_build
+    CLEANUP_FILES += $(install_into_build)
+
+    include ../../../../makesystem/build.mk
+
+    $(BUILD_IIP_ARCHIVE): $(install_into_build)
+
+    $(install_into_build): $(CURDIR)/README
+        cp $(CURDIR)/README $(BUILD_IIP_DATA_BUILD_DIR)
+        touch $@
+
+`build.mk` provides a variable called `BUILD_IIP_ARCHIVE` which contains
+the file name of the final IIP. This file is the name of a target in
+`build.mk` that does the actual archiving. This means by adding dependencies
+to this target you can build the contents of the data build directory.
+
+The variable `BUILD_IIP_DATA_BUILD_DIR_ENABLED` needs to be set to `true` if
+you are using the data build directory. Then the `BUILD_IIP_DATA_BUILD_DIR`
+variable will contain a path, relative to the current working directory,
+to an existing directory which will be available during the IIP building
+process.
+
+
+### Build documentation IIP ###
+
+A minimal makefile for creating a documentation IIP archive looks like this:
+
+    REQUIRES += bootimage/iip
+    REQUIRES += manuals/finalizer
+
+    COMPONENT_TARGETS += $(TARGET_NAME_NOARCH)
+
+    IIP_DEPENDS += finalize:kreatv-kit-manual-finalizer
+
+    BUILD_IIP_DOC = kreatv-doc-base
+    BUILD_IIP_KIT_INSTALL = $(DIST_DIR)/bin/copy_doc_to_kit
+    BUILD_IIP_DESCRIPTION = description.xml
+
+    include ../../../makesystem/build.mk
+
+In addition to the mandatory `BUILD_IIP_*` variables above, you will
+probably want to add a few more to put some actual documentation into the
+archive.
+
+The `copy_doc_to_kit` script used above or something similar in function
+should be used if the documentation IIP is supposed to be assembled by
+the doc finalizer (manuals/finalizer). The script will record
+information about the documentation IIP which is later used when the doc
+finalizer is run. The IIP dependency to the doc finalizer should also be
+specified as it has been above.
+
+Other variables:
+
+`BUILD_IIP_INTERNAL_USE_ONLY`
+: Set to 'true' for internal use only IIP.
+
+
+#### Doxygen generated documentation ####
+
+You may include one or more doxygen subparts into the documentation IIP
+archive. Each subpart corresponds to one doxygen invocation:
+
+    BUILD_DOCPART_DOXY_PARTS = tei_spotify_cpp tei_spoitfy_js
+
+    BUILD_DOCPART_DOXY_INPUT_FILES_tei_spotify_cpp = $(wildcard $(DIST_DIR)/idl/cpp/spotify/*.idl)
+
+    BUILD_DOCPART_DOXY_INPUT_FILES_tei_spotify_js = $(wildcard $(DIST_DIR)/idl/js/spotify/*.idl)
+
+While each subpart's generated documentation will be put into the directory
+`$BUILD_DOCPART_DOCDIST_DIR/reference/<subpart name>`, the relative order of
+subpart names is irrelevant. `BUILD_DOCPART_INPUT_FILES` (what doxygen is being
+fed with) is mandatory for each doxygen subpart. In addition to this variable,
+you may specify a list of directories where doxygen can find images:
+
+    BUILD_DOCPART_DOXY_IMAGE_DIRS_cpp = $(DIST_DIR)/idl/cpp/spotify
+
+You may also specify which documentation tab a subpart's generated
+pages should be located under with the following variable:
+
+    BUILD_DOCPART_DOXY_TAB_<subpart name> = reference_cpp
+
+The default value is `reference`.
+
+
+#### Other documentation files ####
+
+Arbitrary files that should simply be copied to `BUILD_IIP_DOC_BUILD_DIR` by
+`build.mk` without any further processing may be included in the archive by
+placing them in a subdirectory called `files`.
+
+The files will maintain their bsg-relative path within
+`BUILD_IIP_DOC_BUILD_DIR` when copied to support documentation editing
+from unpacked IIPs.
+
+Each file needs to be mapped to a URL to be visible in the final documentation.
+This is done by creating a TOC file for the part called `toc_<partname>.json`.
+The content of the toc must be:
+
+    {
+      "<url>": {
+        "file": "<path to file relative part dir>",
+        "title": "<title of document>",
+        "part": "<name of the part>"
+      }
+    }
+
+
+#### Further customization of archive contents ####
+
+There are some cases where the vanilla variables above aren't enough for
+creating the documentation IIP archive you want. This section provides some
+examples where custom targets needs to be specified.
+
+
+##### Example 1: Generate documentation by other means than doxygen  #####
+
+`build.mk` provides a variable called `BUILD_IIP_ARCHIVE` which contains the
+file name of the final IIP. This file is the name of a target in `build.mk`
+that does the actual archiving, which means that you can include other types of
+processed documentation by adding dependencies to this target:
+
+    $(BUILD_IIP_ARCHIVE): $(BUILD_DOCPART_DOCDIST_DIR)/platform/media/InputFileConstants.html
+
+    $(BUILD_DOCPART_DOCDIST_DIR)/platform/media/InputFileConstants.html: InputFile.h extract_constants.py
+            extract_constants.py $< $@
+
+All generated files must be placed in `BUILD_DOCPART_DOCDIST_DIR`. By doing so
+the makesystem can automatically generate the required toc entries. The URL of
+the file in the example above will be
+"/platform/media/InputFileConstants.html". The title of the page should be
+specified with the @title tag in the html page.
+
+To get the toc entries automatically generated by the makesystem the
+dependencies should be added to `BUILD_DOCPART_TOC_FILE`.
+
+    $(BUILD_DOCPART_TOC_FILE): $(BUILD_DOCPART_DOCDIST_DIR)/platform/media/InputFileConstants.html
+
+
+##### Example 2: Postprocess a static file #####
+
+You can postprocess a static file placed within the part's `files` directory:
+
+    modify_footer  = .modify_footer
+    CLEANUP_FILES += $(modify_footer)
+
+    include ../../../makesystem/build.mk
+
+    $(BUILD_IIP_ARCHIVE): $(modify_footer)
+
+    $(modify_footer): $(BUILD_IIP_DOC_BUILD_DIR)/templates/footer.html
+            sed -i 's/%VERSION%/$(BSG_BUILD_VERSION)/' $<
+            touch $@
+
+Note that these postprocessing changes will not be visible to a
+documentation server started from a bsg tree (/manuals/start_server.sh). The
+unprocessed version will be visible from the documentation editor.
+
+
+##### Example 3: Postprocess a file generated by doxygen #####
+
+If you need to postprocess a file generated by doxygen, you may depend on the
+`BUILD_DOCPART_HTML_DIR` variable provided by `build.mk`; this is the target
+file whose recipe runs doxygen. This snippet adds a title entry for a file that
+has been processed by doxygen although it doesn't contain source code (no type
+declarations means that menu entries won't be generated automatically). Note
+that we need to add the dependencies to `BUILD_DOCPART_TOC_FILE` instead of
+`BUILD_IIP_ARCHIVE` since the title entry is used when the TOC file for the
+doxygen files are generated:
+
+    add_overview_menu_item = .add_overview_menu_item
+
+    CLEANUP_FILES += $(add_overview_menu_item)
+
+    include ../../../makesystem/build.mk
+
+    $(BUILD_DOCPART_TOC_FILE): $(add_overview_menu_item)
+
+    $(add_overview_menu_item): $(BUILD_DOCPART_DOXY_HTML_DIR_tei_verimatrix_js)
+            echo '<!-- @title Verimatrix JS API -->' >> $</tei_js_page.html
+            touch $@
+
+
+### Building kit components ###
+
+Kit components are located on BSG branches in `products/kits`. All kit
+components have in common that they contain a kit configuration file, which
+lists a set of IIPs (much like boot image configurations). The makesystem
+supplies a makefile called `kit.mk` which can and should be included by the kit
+component makefiles (this file, in turn, includes `common.mk`). There are two
+kinds of kit components: *includable* and *deliverable*.
+
+
+#### Includable kits ####
+
+These kit components don't produce actual kit archives themselves; their
+configuration files simply specify a set of IIPs that are often used
+together. The configuration files can then be included by the configuration
+files of other kits to avoid duplicating information in these other kits'
+configuration files.
+
+A minimal makefile for an includable kit component could look like this:
+
+	REQUIRES += bootimage/tools
+
+	COMPONENT_TARGETS += $(TARGET_NAME_NOARCH)
+
+	KIT_CONFIG = kit_config
+
+	include ../../../makesystem/kit.mk
+
+Only one `kit.mk`-related variable should be defined for includable kits:
+
+`KIT_CONFIG`
+: Component-relative path to the kit configuration file.
+
+
+#### Deliverable kits ####
+
+For deliverable kit components, `kit.mk` produces build scripts. A kit build
+script builds a kit archive and, optionally, runs a test suite. The build
+script can [either](#whendeliverablekitsarebuilt) be run when building the kit
+component or later on, when someone actually needs a kit archive.
+
+A makefile for a deliverable kit could look like this:
+
+	REQUIRES += bootimage/tools
+	REQUIRES += products/kits/sdk/sdk-common
+
+	COMPONENT_TARGETS += $(TARGET_NAME_NOARCH)
+
+	KIT_NAME = kreatv-kit-sdk-st40
+	KIT_CONFIG = kit_config
+	KIT_TARGETS = $(TARGET_NAME_ST40)
+
+    include ../../../../makesystem/kit.mk
+
+`KIT_CONFIG` needs to be defined for deliverable kits, just as for includable
+kits. In addition, there are several `kit.mk` variables that are applicable for
+deliverable kits only.
+
+
+##### Mandatory variables #####
+
+`KIT_NAME`
+: The name which will be used for the resulting archive, not including tokens
+  such as `$(BSG_BUILD_VERSION)`, internal use marker or file extension, as
+  these will be added automatically.
+
+`KIT_TARGETS`
+: Defines what devices the kit should include support for. The variable should
+  be assigned a list consisting of one or more items from one or both of the
+  following types:
+
+:-    Device name.
+:-    Toolchain name. The kit will include support for all devices that use the
+      this toolchain.
+
+: A few examples of toolchain/device combinations:
+
+:-    Single toolchain: `KIT_TARGETS = $(TARGET_NAME_ST40)`
+:-    Multiple devices from the same toolchain:
+      `KIT_TARGETS = $(TARGET_NAME_VIP43X2) $(TARGET_NAME_VIP55X2)`
+:-    A combination of a toolchain and a device from a different toolchain:
+      `KIT_TARGETS = $(TARGET_NAME_ST40) $(TARGET_NAME_VIP29X2)`
+:-    Multiple toolchains:
+      `KIT_TARGETS = $(TARGET_NAME_ST40) $(TARGET_NAME_BCM45)`
+
+**Note:** The `COMPONENT_TARGETS` variable should for most kits be set to
+`$(TARGET_NAME_NOARCH)`, regardless of the value of `KIT_TARGETS`.
+
+
+##### Optional variables #####
+
+`ALWAYS_BUILD`
+: Setting this variable to `true` signals that the makesystem should produce a
+  kit when making the `most` make target (done by the dailybuild system).
+  See [When deliverable kits are built] for more information. Default value:
+  `false`.
+
+`KIT_INTERNAL_USE_ONLY`
+: Set to `true` if the internal use token should be included in the archive
+  name. This must be set to true if the kit contains one or more internal IIPs,
+  as the kit sanity check will fail otherwise. Default value: `false`.
+
+`KIT_NOT_SUITABLE_FOR_TESTS`
+: Set to `true` to disable the automatic execution of kit tests after the kit
+  has finished building.
+
+`KIT_TEST_BUILDS_3PP_CODE`
+: Set to `true` if the kit builds 3pp components as part of its test. Then when
+  the kit is built on-demand on the build server, the build server will know
+  which log filter (i.e. either normal or 3pp) to apply to the resulting build
+  log. Default value: `false`.
+
+
+##### When deliverable kits are built #####
+
+Kits can be built immediately or on demand.
+
+*Immediately*
+: Some kits need to be built immediately for each
+  commit, in dailybuild-terms. This can be accomplished using the
+  [`ALWAYS_BUILD`](#optionalvariables) construct. Kits that are built on
+  each commit should be seen as exceptional cases as they increase the time of
+  dailybuilds.
+
+*On demand*
+: By default, kit components do not produce a kit archive in the dailybuild
+  system. Instead, a basic sanity check is performed on the kit configuration,
+  which checks that all IIPs required (given the definition of `KIT_TARGETS`)
+  are available in `dist/products`. The kit archive can then be built in two
+  ways:
+
+-    Using the dailybuild system. Kits can be built after a dailybuild has
+     finished through the *Kits on demand* user interface available on the
+     build's web page.
+-    Locally using the makesystem. A `make local_all` will produce a kit
+     archive for any deliverable kit, whether it is configured to be built on
+     demand or not. The command assumes that all requirements have been built
+     beforehand. If that is not the case, a `make all` command will build all
+     requirements.
+
+
+##### Automatic Kit Tests #####
+
+Unless disabled, tests will automatically be run after the kit has finished its
+building process. See
+[`kit test suites`](../../resources/tests/kit_test_suite.html).
+
+
+### Building boot image components ###
+
+Boot image components are located on BSG branches in
+`products/ip-stb/boot_image`. The makesystem supplies a makefile called
+`bootimage.mk` which should be included by the boot image component makefiles.
+
+Where possible, functionality common to several boot image configurations is
+typically extracted to a separate configuration which is then included (through
+the use of
+[@include](../../resources/tools/build_boot_image.html#config_syntax)) by all
+files that share the functionality. The included file is placed in a
+`common` directory to indicate that multiple configurations depend on it.
+
+The 'build_boot_image' script is supplied with a set of source directories. The
+script will search these directories when trying to find an IIP to include in
+the build. It is possible to add additional directories to this set, by using
+the [@search](../../resources/tools/build_boot_image.html#config_syntax) syntax
+in the boot image config.
+
+A makefile for a boot image component could look like this.
+
+	REQUIRES += bootimage/tools
+
+	COMPONENT_TARGETS += $(TARGET_NAME_VIP28X3)
+	COMPONENT_TARGETS += $(TARGET_NAME_VIP29X2)
+
+	BOOT_IMAGE_NAME = foo
+	BOOT_IMAGE_CONFIG = config
+	BOOT_IMAGE_INTERNAL_USE_ONLY = false
+
+	include ../../../../../makesystem/bootimage.mk
+
+Boot images are only built for devices, therefore setting `COMPONENT_TARGETS`
+to a toolchain target, for instance `$(TARGET_NAME_ST40)`, will not work.
+
+Boot image products are only built by the dailybuild system when explicitly
+stated (see `ALWAYS_BUILD` below).
+
+
+##### Environment variables #####
+
+`BOOT_IMAGE_DIR`
+: Used in boot image configuration files to easily find the absolute path of
+  the products/ip-stb/boot_image directory.
+
+
+##### Mandatory make variables #####
+
+`BOOT_IMAGE_CONFIG`
+: Component-relative path to the boot image configuration file.
+
+`BOOT_IMAGE_NAME`
+: The name of the boot image, for instance 'katt'. The filename of the boot
+  image products will be based on this. Prefixes such as 'kreatv-bi-' or
+  similar will be added by the makesystem. The same for tokens such as
+  `$(BSG_BUILD_VERSION)`, internal use only marker etc.
+
+
+##### Optional make variables #####
+
+`ALWAYS_BUILD`
+: Setting this to `true` means that the makesystem will produce boot image
+  products when making the `most` make target (done by the dailybuild system,
+  i.e. it will build for each commit). Default value: `false`.
+
+`BOOT_IMAGE_INTERNAL_USE_ONLY`
+: Set to `true` if the internal use only token should be included as part of
+  the name of the boot image products. This must be set to true if the boot
+  image configuration file contains one or more internal IIPs.
+  Default value: `false`.
+
+`BOOT_IMAGE_PRODUCTS`
+: Controls which products `bootimage.mk` should build. If defined, this
+  variable should be set to a white-space separated list containing one or more
+  of the tokens `{boot-image kernel rootdisk debug-symbols lib-dependency-info}`.
+  By default, all products will be produced.
+
+`BOOT_IMAGE_USE_DEBUG_KERNEL`
+: When set to `true` the boot image will contain the debug kernel. Default
+  value: `false`.
+
+`BOOT_IMAGE_ADDITIONAL_BUILD_ARGUMENTS`
+: Allows for additional options to be passed along to `build_boot_image`.
+  For example:
+
+        BOOT_IMAGE_NAME = foo
+        BOOT_IMAGE_CONFIG = config
+        BOOT_IMAGE_ADDITIONAL_BUILD_ARGUMENTS  = --goldenimage
+        BOOT_IMAGE_ADDITIONAL_BUILD_ARGUMENTS += --info codename spruce
+
+`PREBUILT_IIP`
+: Allows for prebuilt IIP to be included in boot image config file when building
+  boot image from working copy. Without using it the build image process will not
+  pass the sanity check by complaining that the IIP can not be found in BSG tree.
+  See sanity checking paragraph of "When boot images are built" section for more  information.
+  This variable is used in the Makefile found in the same directory as the
+  prebuilt IIP, typically the value of this variable should be added to
+  'PRODUCT_TARGETS' so that the IIP can be used directly in boot image config file.
+  Note that this variable can not be used in the Makefile located in the boot image component.
+ 
+  For example:
+
+        PREBUILT_IIP = some-prebuilt-iip.iip
+
+##### When boot images are built #####
+
+Boot image components can be built immediately (as part of regular branch
+builds) or on demand.
+
+*Immediately*
+: Some boot image components have `ALWAYS_BUILD` set to `true`,
+  meaning they are built for each commit. Since there's a trade-off between
+  building/testing for regressions and building branches as fast as possible,
+  only some boot image components have this variable set to `true`. Examples
+  are components
+
+-    that build products used by automatic test systems (`smoke-test`,
+     `katt`, `fat` and so on).
+-    whose boot image configuration files are shipped with SDKs.
+
+*On demand*
+: The remaining boot image components are built if/when needed. This can be
+  done in two different ways:
+
+-    by issuing `make all` (automatic build of required components) or
+     `make local_all` in a working copy, or
+-    by locating the component on the BSG branch build's WWW page at
+     [http://svn.arrisi.com](http://svn.arrisi.com) and clicking the `Build`
+     button.
+
+Note that even for the on demand boot image components, a basic sanity check is
+run as part of `local_all` to catch basic errors quickly (if IIPs referenced by
+the configuration file is not available the build will fail). This sanity check
+is a lot quicker than performing the build.

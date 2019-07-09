@@ -1,0 +1,214 @@
+#!/bin/bash
+
+set -eu
+
+master_server=$(svn propget kbs:binfile_server "$(dirname $0)/.." 2>/dev/null \
+                || true)
+if [ -z "$master_server" ]; then
+    master_server=svn.arrisi.com
+fi
+servers="${BINFILE_MIRROR:-} ${SVNMIRROR:-} $master_server"
+url_prefix=/binfiles/
+default_cache_dir=/extra/binfilecache
+cache_dir=${BINFILE_DIR:-$default_cache_dir}
+curl_flags="--fail --http1.0" # HTTP 1.0 needed for Squid compatibility
+curl_flags="$curl_flags --location" # Follow redirects
+VERBOSE=${VERBOSE:-}
+
+BINFILE_PROXY=${BINFILE_PROXY:-}
+export http_proxy=$BINFILE_PROXY
+unset HTTP_PROXY no_proxy NO_PROXY all_proxy ALL_PROXY
+
+###############################################################################
+
+usage() {
+    cat <<EOF
+Usage:
+
+  ${0##*/} get <file>             (get file from cache or download from mirror)
+  ${0##*/} upload <file ...>      (upload file(s) to master server)
+
+Environment variables:
+
+  BINFILE_DIR     Location of the cache (default: $default_cache_dir).
+  BINFILE_MIRROR  Download mirror, priority 1.
+  BINFILE_PROXY   Proxy to use when downloading/uploading (default: none).
+  SVNMIRROR       Download mirror, priority 2.
+
+EOF
+}
+
+error() {
+    echo "${0##*/}: error: $*" >&2
+    exit 1
+}
+
+verbose() {
+    if [ -n "$VERBOSE" ]; then
+        echo "$*"
+    fi
+}
+
+progress() {
+    echo "$*"
+}
+
+download() {
+    local hash=$1 name=$2 dest=$3
+
+    for server in $servers; do
+        verbose "Downloading $name ($hash) from $server..."
+        if curl $curl_flags -o "$dest.tmp.$$" "http://$server$url_prefix$hash"; then
+            mv -f "$dest.tmp.$$" "$dest"
+            return
+        fi
+        verbose "Download from $server failed"
+    done
+    local message="Download of $name ($hash) failed; either the file does not"
+    message="$message exist on the server or proxy settings are incorrect"
+    message="$message (current proxy settings: BINFILE_PROXY='$BINFILE_PROXY')"
+    error "$message"
+}
+
+create_dir() {
+    local dir=$1
+    local old_umask=$(umask)
+
+    set +e
+    umask 000 # Everyone should be allowed to add new files.
+    mkdir -p "$dir" 2>/dev/null
+    status=$?
+    set -e
+    umask $old_umask
+    return $status
+}
+
+verify() {
+    local path=$1 hash=$2
+
+    # Verify integrity; the cache could be corrupt.
+    set -- $(sha1sum "$path")
+    local actual_hash=$1
+    if [ "$actual_hash" != "$hash" ]; then
+        error "$path is corrupt (SHA1 sum is $actual_hash but should be $hash)"
+    fi
+}
+
+update_flags() {
+    local path=$1 flags=$2
+    if [ -n "$flags" ]; then
+        chmod $flags "$path"
+    fi
+}
+
+get() {
+    local path=$1
+    local filename=${path##*/}
+
+    if [ ! -f "$path.bref" ]; then
+        error "$path.bref not found"
+    fi
+
+    local sha1 flags=""
+    source "$path.bref"
+    local file_in_cache="$cache_dir/$sha1"
+
+    if [ ! -f "$file_in_cache" ]; then
+        if ! create_dir "$cache_dir"; then
+            # No (writable) cache directory. Download directly to the
+            # destination instead.
+            verbose "$cache_dir not writable"
+            download "$sha1" "$filename" "$path"
+            verify "$path" "$sha1"
+            update_flags "$path" "$flags"
+            return
+        fi
+
+        local old_umask=$(umask)
+        umask 333 # Make it harder to trash the cache.
+        download "$sha1" "$filename" "$file_in_cache"
+        umask $old_umask
+    fi
+
+    verbose "File in cache: $file_in_cache"
+    verify "$file_in_cache" "$sha1"
+
+    # The cp command preserves file mode (in this case read-only) of the source
+    # file, but we want to create the file according to umask, so use cat
+    # instead.
+    cat "$file_in_cache" >"$path.tmp.$$"
+
+    update_flags "$path.tmp.$$" "$flags"
+    mv -f "$path.tmp.$$" "$path"
+}
+
+upload() {
+    local path=$1
+    local filename=${path##*/}
+    local user=$(id -nu)
+    local url="http://$master_server$url_prefix$user/$filename"
+
+    progress "Uploading $path..."
+    if [ ! -f "$path" ]; then
+        error "No such file: $path"
+    fi
+    if ! curl $curl_flags -o /dev/stdout --upload-file "$path" "$url"; then
+        local message="HTTP PUT failed to $url; check network/proxy settings"
+        message="$message (current proxy settings:"
+        message="$message BINFILE_PROXY='$BINFILE_PROXY')"
+        error "$message"
+    fi
+    set -- $(sha1sum "$path")
+    echo "# This is a placeholder for a binary file." >"$path.bref"
+    echo "sha1=$1" >>"$path.bref"
+    if [ -x "$path" ]; then
+        echo "flags=+x" >>"$path.bref"
+    fi
+    if svn info . >/dev/null 2>&1; then
+        if ! svn info "$path.bref" >/dev/null 2>&1; then
+            progress "Adding $path.bref to SVN..."
+            svn add "$path.bref" >/dev/null
+        fi
+        if svn info "$path" >/dev/null 2>&1; then
+            progress "Removing $path from SVN..."
+            svn rm --force "$path" >/dev/null
+        fi
+        progress "NOTE: You may have to update svn:ignore to match $filename"
+    fi
+}
+
+###############################################################################
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 1
+fi
+
+command=$1
+shift
+case $command in
+    get)
+        [ "$#" -eq 1 ] || error "Bad arguments: $*"
+        if [ -z "$VERBOSE" ]; then
+            curl_flags="$curl_flags --silent"
+        fi
+        get "$1"
+        ;;
+
+    upload)
+        [ "$#" -ge 1 ] || error "At least one file to upload must be specified"
+        for path in "$@"; do
+            upload "$path"
+        done
+        ;;
+
+    -h|--help)
+        usage
+        exit
+        ;;
+
+    *)
+        usage
+        error "Bad command: $command"
+        ;;
+esac

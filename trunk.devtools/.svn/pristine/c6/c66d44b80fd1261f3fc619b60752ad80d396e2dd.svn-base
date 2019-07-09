@@ -1,0 +1,6 @@
+
+[test]
+pytest
+fs>=0.5
+mock
+pycrypto

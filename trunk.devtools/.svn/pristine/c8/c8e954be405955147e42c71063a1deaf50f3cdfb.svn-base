@@ -1,0 +1,295 @@
+#!/usr/bin/python
+"""
+
+This script performs an automated build, based on a .xml file.
+Expects one command-line parameter, the .xml file to process.
+
+Example .xml file:
+
+<autobuild>
+  <builds>
+    <dir> latest </dir>
+    <build>
+      <branch> trunk </branch>
+      <browser> Ekioh Opera </browser>
+      <platforms> TESTS IP800 VMS610 SVR15 </platforms>
+    </build>
+    <build>
+      <branch> DEV_kadvr_sprint8 </branch>
+      <browser> ekioh opera </browser>
+      <platforms> IP800 VMS610 </platforms>
+    </build>
+  </builds>
+  <img>
+    <dir> /extra/users/builds/img_dg/work </dir>
+    <kreatvkit> /extra/users/builds/img_dg </kreatvkit>
+    <vmskit> /extra/users/builds/img_dg </vmskit>
+    <vmsapp> /extra/users/builds/img_dg </vmsapp>
+    <vzzip> /extra/users/builds/img_dg/VMS.Ver-15.21.ED6.4 </vzzip>
+  </img>
+</autobuild>
+
+builds      encloses the builds
+build       separates the individual builds
+branch      which branch to build (or trunk)
+browser     which browser to build for, Opera or Ekioh (or both)
+platforms   which platforms to build for (IP800, VMS610, ...)
+
+The specified branch will be fetched, the platforms.mk file will be changed,
+and the code will be built for a browser.  If more than one browser is
+specified, then svn-clean will be used followed by changing the platforms.mk
+file, and it will be built for the other browser.
+
+img         an IMG/Dream Gallery build
+dir         directory for the results
+kreatvkit   directory for the kreatv-kit-sdk/kadk/dfbdk tgz files
+vmskit      directory for vms-kit tgz file
+vmsapp      directory for the VZ-VMSApp iip file
+vzzip       directory for the files from the vzzip file
+
+"""
+
+import xml.dom.minidom
+import sys
+import fnmatch
+import os
+import subprocess
+import re
+
+VERSION = '1.00'
+
+
+def get_text(nodelist):
+    rc = ""
+    for node in nodelist:
+        if node.nodeType == node.TEXT_NODE:
+            rc = rc + node.data
+    return rc
+
+
+def get_text_from_tag(base, tag):
+    txt = ''
+    nodes = base.getElementsByTagName(tag)
+    if nodes:
+        txt = get_text(nodes[0].childNodes)
+        txt = txt.strip()
+        # print '%s: get_text_from_tag: %s: %s' % (my_name, tag, txt)
+    else:
+        print "%s: get_text_from_tag: couldn't find %s" % (my_name, tag)
+    return txt
+
+
+def get_build_dir(tag):
+    build_dir = home_dir
+    dir = get_text_from_tag(tag, 'dir')
+    if dir != '':
+        build_dir = dir
+    if not os.path.exists(build_dir):
+        os.mkdir(build_dir)
+    os.chdir(build_dir)
+    build_dir = os.getcwd()
+    print '%s: build_dir: %s' % (my_name, build_dir)
+
+
+def fetch_branch(branch):
+    subprocess.call(['date'])
+    print '%s: fetch_branch: %s' % (my_name, branch)
+    if branch == 'trunk':
+        str = ''
+    else:
+        str = 'branches/'
+    str = 'http://svn.arrisi.com/dev/bsg/' + str + branch
+    print '%s: call /usr/bin/svn co %s' % (my_name, str)
+    subprocess.call(['/usr/bin/svn', 'co', str])
+
+
+def create_package_dir(branch, browser):
+    dir = home_dir + '/pkg'
+    if not os.path.exists(dir):
+        print '%s: mkdir %s' % (my_name, dir)
+        os.mkdir(dir)
+    dir = dir + '/' + branch
+    if not os.path.exists(dir):
+        print '%s: mkdir %s' % (my_name, dir)
+        os.mkdir(dir)
+    dir = dir + '/' + browser
+    if not os.path.exists(dir):
+        print '%s: mkdir %s' % (my_name, dir)
+        os.mkdir(dir)
+
+
+def svn_clean():
+    subprocess.call(['date'])
+    print '%s: svn-clean' % my_name
+    subprocess.call(['svn-clean', '-f', '-q'])
+
+
+def set_platforms(platforms):
+    subprocess.call(['date'])
+    print '%s: set_platforms: %s' % (my_name, platforms)
+    args = ['platforms', '-c', '-f', '-t']
+    for p in platforms.split():
+        args.append(p)
+    result = subprocess.call(args)
+    print '%s: platforms returned %s' % (my_name, result)
+
+
+def get_target(browser):
+    print '%s: get_target: %s' % (my_name, browser.lower())
+    if browser.lower() == 'ekioh':
+        target = 'products/ip-stb/boot_image/custom'
+    elif browser.lower() == 'opera':
+        target = 'products/ip-stb/boot_image/directfb'
+    else:
+        target = ''
+    print '%s: target: %s' % (my_name, target)
+    return target
+
+
+def get_cores():
+    cores = subprocess.check_output(
+        ['grep', '-c', 'processor', '/proc/cpuinfo'])
+    cores = cores.strip()
+    print '%s: cores: %s' % (my_name, cores)
+    return cores
+
+
+def build(cores, target):
+    subprocess.call(['date'])
+    print '%s: build: cores: %s, target: %s' % (my_name, cores, target)
+    result = subprocess.call(['time', 'make', '-j%s' % cores, '-C', target])
+    print '%s: make returned %s' % (my_name, result)
+
+
+def save_package_files(branch, browser):
+    subprocess.call(['date'])
+    print '%s: save_package_files: %s, %s' % (my_name, branch, browser)
+    cwd = os.getcwd()
+    print '%s: cwd: %s' % (my_name, cwd)
+    files = os.listdir('%s/dist/products' % cwd)
+    for file in files:
+        if re.search(".pkg", file):
+            subprocess.call(
+                ['cp',
+                 '%s/dist/products/%s' % (cwd, file),
+                 '%s/pkg/%s/%s' % (home_dir, branch, browser)])
+
+
+def process_build(branch, browsers, platforms):
+    print '%s: process %s, %s, %s' % (my_name, branch, browsers, platforms)
+    fetch_branch(branch)
+    os.chdir(branch)
+    for browser in browsers.split():
+        create_package_dir(branch, browser)
+        svn_clean()
+        set_platforms(platforms)
+        target = get_target(browser)
+        cores = get_cores()
+        build(cores, target)
+        save_package_files(branch, browser)
+    os.chdir('..')
+
+
+def process_tgz_file(dir, prefix):
+    print '%s: process_tgz_file: dir: %s, prefix: %s' % (my_name, dir, prefix)
+    for file in os.listdir(dir):
+        if fnmatch.fnmatch(file, prefix + '*gz'):
+            print '%s: extract file %s' % (my_name, file)
+            subprocess.call(['tar', '-xzvf', dir + '/' + file])
+            return
+
+
+def process_file(dir, which):
+    print '%s: process_file: dir: %s, which: %s' % (my_name, dir, which)
+    for file in os.listdir(dir):
+        if fnmatch.fnmatch(file, which):
+            print '%s: copy file %s' % (my_name, file)
+            subprocess.call(['cp', dir + '/' + file, '.'])
+            return
+
+
+def process_kreatvkit(img):
+    dir = get_text_from_tag(img, 'kreatvkit')
+    print '%s: kreatvkit dir: %s' % (my_name, dir)
+    process_tgz_file(dir, 'kreatv-kit-sdk_')
+    process_tgz_file(dir, 'kreatv-kit-kadk_')
+    process_tgz_file(dir, 'kreatv-kit-dfbdk_')
+
+
+def process_vmskit(img):
+    dir = get_text_from_tag(img, 'vmskit')
+    print '%s: vmskit dir: %s' % (my_name, dir)
+    process_tgz_file(dir, 'vms-kit-')
+
+
+def process_vmsapp(img):
+    dir = get_text_from_tag(img, 'vmsapp')
+    print '%s: vmsapp dir: %s' % (my_name, dir)
+    process_file(dir, 'VZ-VMSApp*.ipp')
+
+
+def process_vzzip(img):
+    dir = get_text_from_tag(img, 'vzzip')
+    print '%s: vzzip dir: %s' % (my_name, dir)
+    process_file(dir, 'vz-lighttpd-*')
+    process_file(dir, 'vz-vmsconfig_*')
+    process_file(dir, 'vz-php-*')
+    process_file(dir, 'vz-fcgi-*')
+    process_file(dir, 'vz-jansson-*')
+    process_file(dir, 'vz-log4cplus-*')
+    process_file(dir, 'vz-vmswebapp_*')
+    process_file(dir, 'VZ-VMSApp_dev-*')
+    process_file(dir, 'VZ-NotificationApp-*')
+    process_file(dir, 'vms.config.opera')
+
+
+def process_img(img):
+    get_build_dir(img)
+    print '%s: process IMG' % my_name
+    process_kreatvkit(img)
+    process_vmsapp(img)
+    process_vzzip(img)
+    # change kreatv-app-opera-portal
+
+
+def process_builds(builds):
+    get_build_dir(builds)
+    builds = builds.getElementsByTagName('build')
+    for build in builds:
+        branch = get_text_from_tag(build, 'branch')
+        browser = get_text_from_tag(build, 'browser')
+        platforms = get_text_from_tag(build, 'platforms')
+        process_build(branch, browser, platforms)
+    os.chdir(home_dir)
+
+
+def process_dom(dom):
+    builds = dom.getElementsByTagName("builds")
+    if len(builds) == 0:
+        print '%s: builds does not exist' % my_name
+    else:
+        builds = builds.item(0)
+        process_builds(builds)
+
+    img = dom.getElementsByTagName("img")
+    if len(img) == 0:
+        print '%s: img not found' % my_name
+    else:
+        process_img(img[0])
+
+
+my_name = sys.argv[0]
+print '%s version %s' % (my_name, VERSION)
+home_dir = os.getcwd()
+build_dir = ''
+if len(sys.argv) > 1:
+    file = sys.argv[1]
+    if file == '':
+        print '%s ERROR: no file specified' % my_name
+    else:
+        f = open(file, 'r')
+        str = f.read()
+        dom = xml.dom.minidom.parseString(str)
+        process_dom(dom)
+else:
+    print '%s ERROR: expected an XML file' % my_name

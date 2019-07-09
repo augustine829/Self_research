@@ -1,0 +1,178 @@
+#!/bin/bash
+
+set -eu
+
+usage() {
+   cat <<EOF
+Usage:
+    fetchkattblockerbugs [option] [BUG_REFERENCES]
+
+    This script finds bug references in *.py and *.js KATT test cases in any
+    KreaTV code tree. Run it in the root of the tree.
+    If one or several issue references are specified, only test cases mentioning
+    those bugs in KATTdisabled or KATTlog will be included.
+
+Options (several allowed):
+    -h / --help         Show this help text.
+    -l / --level LEVEL  Only include test cases for a certain level.
+                        Note: Scan log blockers will be missed.
+    -f / --fg FG        Only include test cases for a specific function group.
+    <bug numbers>       Only check KATTdisabled and KATTlog for bug references.
+    -d / --disabled     Only check KATTdisabled for bug references.
+    -g / --greylist     Only check KATTlog for bug references.
+    -s / --suite SUITE  Only include test cases for a specific test suite group.
+    -u / --url          Output URL instead of list.
+    -c / --closed       Set filter in URL to show all closed bugs. These bugs should be reopened.
+    -t / --tw           Set filter in URL to show bugs missing trunkwatch or BlocksKattTest label.
+                        These bugs should get these labels.
+    -n / --nw           Set filter in URL to show open bugs not worthy of trunkwatch and BlocksKattTest
+                        labels. These are neither backtracked nor block KATT tests.
+Examples:
+    > fetchkattblockerbugs 10476 11849 12908
+    ./applications/katt-tests/tc_secure_xhr_origin_domain.py:#KATTdisabled: vip28x3, KREATV-10476, test triggers STB reboot
+    ./extension/ca/securemedia/katt-tests/tc_securemedia_box_registration_check.py:# KATTdisabled: vip19x3, KREATV-11849
+    ./extension/ca/securemedia/katt-tests/tc_securemedia_box_registration_check.py:# KATTdisabled: vip28x3, KREATV-11849
+    ./platform/katt-tests/tc_platform_service_fail.py:#KATTdisabled: vip1002, KREATV-12908, intermittently fails
+
+    > fetchkattblockerbugs -u
+    Copy and paste this URL in a browser to see a list of bugs in JIRA:
+    http://odart.arrisi.com/issues/?jql=id+in+(KREATV-12055,KREATV-12488,KREATV-12955)
+
+    > fetchkattblockerbugs -f CommonSoftware
+    ./tc_information_object.py:#KATTdisabled: vip1003, KREATV-12488, intermittently gets blocked
+    ./tc_information_object.py:#KATTdisabled: vip1963, KREATV-12488, intermittently gets blocked
+
+    > fetchkattblockerbugs -d KREATV-27958
+    ./tc_platform_dynamic.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_platform_dynamic_services_sharing.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_dynamic_component.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+
+    > fetchkattblockerbugs -g KREATV-27958
+    ./tc_platform_dynamic.py:# KATTlog: greylist, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_dynamic_component.py:# KATTlog: greylist, KREATV-27958, rte.*TCIpcClient(\[0x\w+\])?: Could not connect to server
+
+    > fetchkattblockerbugs KREATV-27958
+    ./tc_platform_dynamic.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_platform_dynamic_services_sharing.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_dynamic_component.py:# KATTdisabled: vip4302, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_platform_dynamic.py:# KATTlog: greylist, KREATV-27958, Get new spotify lib with new toolchain bcm15
+    ./tc_dynamic_component.py:# KATTlog: greylist, KREATV-27958, rte.*TCIpcClient(\[0x\w+\])?: Could not connect to server
+EOF
+}
+
+help() {
+    rm -f .disabled_testcases .tmpfile
+    cat <<EOF
+For usage information run: fetchkattblockerbugs -h
+EOF
+}
+
+fetch_bugs() {
+    ignore_files="dist katt_keyword_definitions.py run_katt_check_unit_tests.py run_katt_tests.py"
+
+    find \( `for f in $ignore_files; do echo -n " -name $f -or"; done` -false \) -prune -or \( -name '*.py' -or -name '*.js' \) -print | \
+        ( [ $level != "all" ] && xargs -r grep -E "(#|//) *KATTlevel.* $level" | sed -e 's!\(.*\):.*KATTlevel.*!\1!' || cat ) | \
+        ( [ -n "$fg" ] && xargs -r grep -iE "(#|//) *KATTfunctiongroup: *$fg" | sed -e 's!\(.*\):.*KATTfunctiongroup.*!\1!' || cat ) | \
+        ( [ -n "$katt_suite" ] && xargs -r grep -iE "(#|//) *KATTsuite: *$katt_suite" | sed -e 's!\(.*\):.*KATTsuite.*!\1!' || cat ) | \
+        xargs -r grep -E "(#|//) *(KATTdisabled|KATTlog)" | grep -E "($bug_numbers)" | \
+        ( [ -n "$katt_disabled_only" ] && grep -E "(#|//) *KATTdisabled" || cat ) | \
+        ( [ -n "$katt_log_only" ] && grep -E "(#|//) *KATTlog" || cat ) | \
+        sort -u > .disabled_testcases
+
+    if [ -z "$output_url" ]; then
+        cat .disabled_testcases
+    else
+        echo "Copy and paste this URL in a browser to see a list of bugs in JIRA:"
+        <.disabled_testcases sed -e 's/ //g' -e 's/.*KREATV[-:]*\([0-9]*\).*/KREATV-\1/g' | sort -u | tr '\n' "," | \
+            sed "s!\(.*\),!http://odart.arrisi.com/issues/?jql=id$not+in+(\1)!g"
+
+        if [ -n "$closed" ]; then
+            echo -ne '+AND+status+in+(Closed,Fixed)'
+        fi
+        if [ -n "$missing_label" ]; then
+            echo -ne '+AND+(labels+is+EMPTY+OR+labels+not+in+(trunkwatch,BlocksKattTest))'
+        fi
+        if [ -n "$should_not_have_labels" ]; then
+            echo -ne '+AND+project=KREATV+AND+status+not+in+(Closed,Fixed)+AND+labels=trunkwatch+AND+labels!=backtracked+AND+labels!=smoketestsystem'
+        fi
+        echo ""
+    fi
+    rm -f .disabled_testcases .tmpfile
+}
+
+find_all=
+output_url=
+bug_numbers="KREATV-"
+closed=
+missing_label=
+should_not_have_labels=
+katt_disabled_only=
+katt_log_only=
+katt_suite=
+not=
+level="all"
+fg=
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -b|--bugs|bugs)
+            # Has no affect and deprecated, do nothing...
+            ;;
+        -a|--all|all)
+            # Has no affect and deprecated, do nothing...
+            ;;
+        -d|--disabled|disabled)
+            katt_disabled_only=1
+            ;;
+        -g|--greylist|greylist)
+            katt_log_only=1
+            ;;
+        -u|--url|url)
+            output_url=1
+            ;;
+        -c|--closed|closed)
+            output_url=1
+            closed=1
+            ;;
+        -t|--tw|trunkwatch)
+            output_url=1
+            missing_label=1
+            ;;
+        -n|--nw)
+            output_url=1
+            not="+not"
+            should_not_have_labels=1
+            ;;
+        -l|--level|level)
+            level=$2
+            shift
+            ;;
+        -f|--fg|fg)
+            fg=$2
+            shift
+            ;;
+        -s|--suite|suite)
+            katt_suite=$2
+            shift
+            ;;
+        -*)
+            echo -e "Error: Unrecognized option: \"$1\"" >&2
+            help
+            exit 1
+            ;;
+        *)
+            if [ "$bug_numbers" == "KREATV-" ]; then
+                bug_numbers="$1"
+            else
+                bug_numbers="$bug_numbers|$1"
+            fi
+            ;;
+    esac
+    shift
+done
+
+fetch_bugs

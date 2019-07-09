@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings FATAL => "all";
+use File::Find qw(find);
+
+@ARGV == 2 or die "Usage: strip_tree <toolchain-strip> <path>";
+my ($STRIP, $PATH) = @ARGV;
+
+my $verbose = $ENV{VERBOSE};
+
+sub is_elf {
+    my ($file) = @_;
+
+    if (-f $file && ! -l $file) {
+        open my $fh, "<", $file or die "$file: $!";
+        read $fh, my $magic, 4;
+        close $fh;
+        return $magic eq "\x7fELF";
+    }
+    else {
+        return 0;
+    }
+}
+
+sub is_debug {
+    my ($file) = @_;
+
+    if ($file =~ /\.debug$/) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+sub strip {
+    my $file = $_;
+
+    return if ($file =~ m#lib/firmware/#);
+    return unless is_elf $file;
+    return if is_debug $file;
+
+    my @command;
+    my $type = `file -b $file`;
+    if ($type =~ /ELF[^,]*, (Intel 80386|x86-64)/) {
+        # Assume Intel code is run on host
+        @command = "strip";
+    }
+    elsif ($type =~ /ELF[^,]*relocatable/) {
+        @command = ($STRIP, qw(-R .comment -R .note -R .note.GNU-stack -R .pdr --strip-unneeded));
+    }
+    elsif ($type =~ /ELF[^,]*(executable|shared object)/) {
+        @command = ($STRIP, qw(-R .comment -R .jcr -R .note -R .note.ABI-tag -R .pdr -s));
+    }
+    if (@command) {
+        print "Stripping $file\n" if ($verbose);
+        system(@command, $file) == 0 or die "$file: $!";
+    }
+}
+
+exit 0 if $STRIP eq ":";
+
+find {wanted => \&strip, no_chdir => 1}, $PATH;

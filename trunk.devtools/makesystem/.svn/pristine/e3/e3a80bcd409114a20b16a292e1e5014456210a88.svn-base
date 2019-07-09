@@ -1,0 +1,22 @@
+#!/bin/sh
+
+cd $(dirname $0)
+rm -rf noarch
+mkdir noarch
+trap "rm -rf noarch" EXIT
+
+mock_h=noarch/TMockTest.h
+mock_cpp=noarch/TMockTest.cpp
+mock_deps=noarch/TMockTest_deps.d
+../../createmock local "my-long_path/sub" ITest.h $mock_h $(pwd) $mock_deps
+r="[  PASSED  ]"
+e=0
+
+sed -ri '/Copyright/s/[0-9]+/YEAR/' $mock_h $mock_cpp
+
+diff -u TMockTest.h $mock_h || { r="[  FAILED  ]"; e=1; }
+diff -u TMockTest.cpp $mock_cpp || { r="[  FAILED  ]"; e=1; }
+diff -u TMockTest_deps.d $mock_deps || { r="[  FAILED  ]"; e=1; }
+
+echo $r
+exit $e

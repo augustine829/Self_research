@@ -1,0 +1,91 @@
+#!/usr/bin/env python2
+
+# Copyright (c) 2010-2015 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+import sys
+import os.path
+import re
+
+link_regexp = re.compile("(src|SRC|href|HREF)\s*=\s*\"(.*?)\"")
+menu_regexp = re.compile(".add\([0-9]+,\s*[0-9]+,\s*\"(.*?)\",\s*\"(.*?)\"\)")
+
+
+def print_usage(script_name):
+    print "Usage: %s <file>" % os.path.basename(script_name)
+    print "Searches recursively for broken HTML links."
+
+
+# Recursively traverse HTML files to find broken links.
+def traverse(file_name, processed_files):
+    file_name = os.path.normpath(file_name)
+
+    #print "Traversing %s" % file_name
+    try:
+        f = open(file_name)
+    except:
+        print "%s cannot be opened!" % file_name
+        return False
+
+    links = []
+    for line in f:
+        for m in link_regexp.finditer(line):
+            links.append(m.group(2))
+        for m in menu_regexp.finditer(line):
+            links.append(m.group(2))
+
+    result = True
+    for link in links:
+        # Remove part of link that refers to anchor within file
+        # TODO: Start checking that anchors exists in files!
+        link = link.split("#")[0]
+        if len(link) == 0:
+            # Internal link to anchor. Ignore!
+            continue
+
+        if link.startswith("mailto:") \
+                or link.startswith("javascript:") \
+                or link.startswith("http:") \
+                or link.startswith("https:"):
+            # Ignore external, mail and javascript links.
+            continue
+        if (link.startswith("file:")):
+            # Some HTML code examples show how to link to files on the
+            # bootimage. The script will pick up these as well. All of
+            # these demonstration links starts with file: so this is
+            # an ugly workaround...
+            continue
+        if link.endswith(".js"):
+            # Ignore Javascript files
+            continue
+
+        link_file_name = os.path.normpath(os.path.join
+                                          (os.path.dirname(file_name), link))
+        if link_file_name in processed_files:
+            # Already analyzed this HTML file!
+            continue
+        else:
+            processed_files.append(link_file_name)
+
+        if os.path.exists(link_file_name):
+            if not traverse(link_file_name, processed_files):
+                result = False
+        else:
+            print "Warning: Broken link from %s to %s." % (file_name,
+                                                           link)
+            result = False
+    return result
+
+if len(sys.argv) != 2:
+    print_usage(sys.argv[0])
+    sys.exit(1)
+else:
+    print "Looking for broken links"
+    if traverse(sys.argv[1], []):
+        sys.exit(0)
+    else:
+        sys.exit(1)

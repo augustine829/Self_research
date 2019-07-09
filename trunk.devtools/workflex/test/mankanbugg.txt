@@ -1,0 +1,14 @@
+namn = Marcus Gustafsson
+år = 2006
+månad = 10
+inflex = 30:12
+komptidsuttag = 0:00
+ingående komptid = 0:00
+ingående övertid1 = 0:00
+ingående övertid2 = 0:00
+övertid i pengar = nej
+
+2006-10-02 mån 09:00-10:20  n KR.UTV.GEN
+2006-10-02 mån 11:40-17:59  n Pxxxx.1900.190 
+
+2006-10-09 mån 10:00-10:20  n KR.UTV.GEN

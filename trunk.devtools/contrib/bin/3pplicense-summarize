@@ -1,0 +1,133 @@
+#!/usr/bin/env python
+
+from optparse import OptionParser
+from os.path import dirname, realpath
+import os
+import sys
+
+sys.path.insert(0, dirname(realpath(__file__)) + "/../../lib/3pplicense")
+import threepplicense
+
+def on_walk(arg, dirname, names):
+    # skip .svn/ and dist/ directories
+    if dirname.endswith('/.svn') or dirname.endswith('/dist'):
+        return
+    for idx, file in enumerate(names):
+        if file == '.svn' or file == 'dist':
+            del names[idx]
+            continue
+
+    for name in names:
+        if (name != '3PPLICENSE' and not name.startswith("3PPLICENSE.")) \
+           or name.endswith('~'):
+            continue
+        tpp = threepplicense.parse(dirname + '/' + name, exit_on_error=False)
+        if 'NAME' not in tpp:
+            tpp['NAME'] = dirname + ' NONAME'
+        if 'VERSION' not in tpp:
+            tpp['VERSION'] = 'NOVER'
+        on_tpp(tpp)
+
+def on_tpp(tpp):
+    tpps.append(tpp)
+
+def print_short_report(print_paths):
+    for tpp in tpps:
+        if print_paths:
+            path = '   ' + tpp['PATH']
+        else:
+            path = ''
+        print tpp['NAME'] + ' ' + tpp['VERSION'] + ': ' + tpp['LICENSE'] + path
+
+def print_report():
+    for tpp in tpps:
+        if options.verbose:
+            print_tpp_verbose(tpp)
+        else:
+            print_tpp_normal(tpp)
+
+    gpl_tpps = [tpp['NAME'] + ' ' + tpp['VERSION']
+                for tpp in tpps if tpp['LICENSE'] == 'GPLv2']
+    lgpl_tpps = [tpp['NAME'] + ' ' + tpp['VERSION']
+                 for tpp in tpps if tpp['LICENSE'] == 'LGPLv21']
+
+    print '[GNU General Public License version 2 (GPLv2) license text]:'
+    print ', '.join(gpl_tpps)
+    print threepplicense.GPLv2
+    print_separator()
+    print ('[GNU Lesser General Public License version 2.1 (LGPLv21) license'
+           ' text]:')
+    print ', '.join(lgpl_tpps)
+    print threepplicense.LGPLv21
+
+def print_tpp_normal(tpp):
+    if tpp['LICENSE'] == 'GPLv2' or tpp['LICENSE'] == 'LGPLv21':
+        return
+    print tpp['NAME'] + ' ' + tpp['VERSION'] + ': '
+    if 'ATTRIBUTION' in tpp:
+        print tpp['ATTRIBUTION']
+    print_separator()
+
+def print_tpp_verbose(tpp):
+    if tpp['LICENSE'] == 'GPLv2' or tpp['LICENSE'] == 'LGPLv21':
+        return
+    print (tpp['NAME'] + ' ' + tpp['VERSION'] + ': ' + tpp['LICENSE']
+           + ' license')
+    if 'ATTRIBUTION' in tpp:
+        print '[Attribution for end-user documentation]:'
+        print tpp['ATTRIBUTION']
+    if 'COMMENT' in tpp:
+        print '[License information]:'
+        print tpp['COMMENT']
+    print_separator()
+
+def print_separator():
+    print "-" * 79
+
+def sort():
+    tpps.sort(lambda l, r: cmp(l['NAME'].lower(), r['NAME'].lower()))
+
+excluded = set(['proprietary', 'excluded', 'internaluseonly', 'unknown'])
+def filter_licenses():
+    global tpps
+    for tpp in tpps:
+        if 'LICENSE' not in tpp:
+            print tpp
+
+    tpps = [tpp for tpp in tpps if tpp['LICENSE'].lower() not in excluded]
+
+
+root = '.'
+tpps = []
+
+parser = OptionParser("usage: %prog [options] [BRANCHPATH]")
+parser.add_option("-v", "--verbose",
+                  action="store_true", dest="verbose", default=False,
+                  help="Generate verbose report")
+parser.add_option("-s", "--summarize",
+                  action="store_true", dest="summarize", default=False,
+                  help="Generate report summary")
+parser.add_option("-a", "--all",
+                  action="store_true", dest="all", default=False,
+                  help=("Include all license types, including: "
+                        + ", ".join(excluded)))
+parser.add_option("-p", "--print-paths",
+                  action="store_true", dest="print_paths", default=False,
+                  help="Print path names in summarized reports")
+
+(options, args) = parser.parse_args()
+if len(args) > 1:
+    parser.print_help()
+    exit(1)
+if len(args) == 1:
+    root = args[0]
+
+os.path.walk(root, on_walk, None)
+
+if not options.all:
+    filter_licenses()
+sort()
+if options.summarize:
+    print_short_report(options.print_paths)
+else:
+    print_report()

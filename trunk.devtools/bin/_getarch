@@ -1,0 +1,107 @@
+#!/bin/bash
+# This is a script for internal use by
+#   update-rootdisk
+#   unpack-root
+#   upload-blobs
+#   upload-bi
+#   use-nfs
+#   use-bi
+#   _checkenv
+# It takes a model name and returns the corresponding architecture string
+# model name, or the other way around.
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <model>"
+    exit 1
+fi
+
+case "$1" in
+    "1500")
+	echo "mipsel-kreatel-linux-gnu"
+	;;
+    "1700")
+	echo "mipsel-kreatel-linux-gnu"
+	;;
+    "1900")
+	echo "sh4-kreatel-linux-gnu"
+	;;
+    "1903")
+	echo "sh4-kreatel-linux-gnu"
+	;;
+    "19x0")
+	echo "sh4-kreatel-linux-gnu"
+	;;
+    "19x3")
+	echo "sh4-kreatel-linux-gnu"
+	;;
+    "28x3")
+	echo "sh4-kreatel-linux-gnu"
+	;;
+    "2000")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "10x2")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "20x2")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "22x2")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "25x2")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "26x2")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "dcx3200p3")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "ip700")
+        echo "mipsel-bcm740x-linux-gnu"
+        ;;
+    "29x2")
+        echo "bcm45"
+        ;;
+    "dcx35xx")
+        echo "bcm45"
+        ;;
+    "ip800")
+        echo "bcm45"
+        ;;
+    "svr610")
+        echo "bcm45"
+        ;;
+    "svr15")
+        echo "bcm45"
+        ;;
+    "vms610")
+        echo "bcm45"
+        ;;
+    "b2000")
+        echo "armv7"
+        ;;
+    "34x2")
+        echo "bcm15"
+        ;;
+    "35x0")
+        echo "bcm15"
+        ;;
+    "43x2")
+        echo "bcm15"
+        ;;
+    "43x3")
+        echo "st9"
+        ;;
+    "55x2")
+        echo "bcm15"
+        ;;
+    "hmc4000")
+        echo "hi3716"
+        ;;
+    *)
+	echo "Error: \"$1\" is an invalid model name (says _getarch)." >&2
+	exit 1
+	;; 
+esac

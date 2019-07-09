@@ -1,0 +1,7 @@
+# Fixes inherited indent levels for throw and const
+const_throw_indent.patch
+
+# Disables indentation of lines that would be too long
+# Disabled since it is not needed as long as we do not use uncrustify in
+# a commit hook.
+#long_line_indent.patch

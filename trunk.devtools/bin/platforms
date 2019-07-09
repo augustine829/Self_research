@@ -1,0 +1,607 @@
+#!/usr/bin/python
+# Copyright (c) 2013 Motorola Mobility, Inc. All rights reserved.
+# Copyright (c) 2013-2014 ARRIS Group, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Group, Inc. (ARRIS),
+# and may not be copied, reproduced, modified, disclosed to others, published
+# or used, in whole or in part, without the express prior written permission
+# of ARRIS.
+"""
+This script helps in creating and setting up the platforms.mk file.
+See the usage() function for help.
+"""
+
+import wxversion
+wxversion.select("2.8")
+import wx
+import wx.html
+import sys
+import os
+import re
+import shutil
+
+version = '2.03'
+myname = sys.argv[0]
+cwd = os.getcwd()
+makesystem = 'makesystem'
+platforms_mk = makesystem + '/platforms.mk'
+template = platforms_mk + '.template'
+sentences = []
+buttons = []
+need_to_write = False
+wc_home = ''
+debug = False
+build_re = re.compile('BUILD_\w*\s*=\s*\w*')
+which_re = re.compile('BUILD_\w*')
+true_false_re = re.compile('(true|TRUE|false|FALSE)')
+
+
+#
+# Given a directory, find the 'working copy home' for that directory.
+# The working copy home is the directory that has the subdirectory makesystem.
+#
+def find_wc_home(dir):
+    global makesystem
+    global template
+    global debug
+    savedir = os.getcwd()
+    done = False
+    result = 'none'
+    os.chdir(dir)
+    while not done:
+        dir = os.getcwd()
+        if debug:
+            print 'check dir %s' % dir
+        # check for top level directory (and add a windows check for testing)
+        if dir == '/' or dir == 'D:\\':
+            done = True
+        files = os.listdir(dir)
+        if makesystem in files:
+            file = dir + '/' + template
+            if debug:
+                print 'found makesystem, look for %s' % file
+            if os.path.exists(file):
+                if debug:
+                    print 'found %s' % file
+                done = True
+                result = dir
+            else:
+                os.chdir('..')
+        else:
+            os.chdir('..')
+    os.chdir(savedir)
+    if debug:
+        print 'find_wc_home: %s' % result
+    return result
+
+
+#
+# Read the platforms.mk file in to the sentences list.
+# Returns True if platforms.mk was found and read into list.
+#
+def read_platforms_mk():
+    global sentences
+    global platforms_mk
+    global wc_home
+    # return if we already read the file
+    if len(sentences) != 0:
+        return True
+
+    file = wc_home + '/' + platforms_mk
+    try:
+        f = open(file)
+    except IOError:
+        # print 'error opening %s' % (file)
+        # print '%s' % (e)
+        # print 'ERROR: unable to find %s, try -copy option' % platforms_mk
+        return False
+
+    lines = f.readlines()
+    f.close()
+
+    for line in lines:
+        if line:
+            str = line.rstrip('\n')
+            sentences.append(str)
+
+    return True
+
+
+#
+# Write a new platforms.mk file from the sentences list.
+#
+def write_platforms_mk():
+    global sentences
+    global platforms_mk
+    global wc_home
+    filename = wc_home + '/' + platforms_mk
+    with open(filename, 'w') as file:
+        for line in sentences:
+            file.write(line)
+            file.write('\n')
+
+
+#
+# Dump the contents of the sentences list
+#
+def dump_sentences():
+    global sentences
+    for line in sentences:
+        print line
+
+
+#
+# Copy the platforms.mk.template file to platforms.mk
+#
+def copy_file():
+    global platforms_mk
+    global template
+    global wc_home
+    global debug
+    if debug:
+        print 'copy %s to %s' % (template, platforms_mk)
+    try:
+        shutil.copyfile(wc_home + '/' + template,
+                        wc_home + '/' + platforms_mk)
+    except IOError:
+        print 'ERROR copying %s to %s' % (template, platforms_mk)
+        return
+
+
+def set_all(old, what):
+    global sentences
+    global debug
+    if debug:
+        print 'set all values to %s' % (what)
+    for i in range(len(sentences)):
+        line = sentences[i]
+        match = re.search('BUILD_(\w+)[ \t]*=[ \t]*(\w+)', line)
+        if match:
+            new_line = line.replace(old, what)
+            sentences[i] = new_line
+
+
+#
+#   Process the file (sentences list) based on criteria.
+#   which_list  A list specifying items to be changed.  An empty list means
+#               change all values.  Non-empty means change those items, like
+#               'VMS610" for BUILD_VMS610.
+#   what        Specifies what to change the values to, either 'true' or
+#               'false'.
+#
+def process_file(which_list, what):
+    global sentences
+    global debug
+    if debug:
+        print 'process_file: which_list: %s, what: %s' % (which_list, what)
+    if what == 'true':
+        old = 'false'
+    else:
+        old = 'true'
+    if len(which_list) == 0:
+        set_all(old, what)
+    else:
+        for which in which_list:
+            if debug:
+                print 'set BUILD_%s to %s' % (which, what)
+            for i in range(len(sentences)):
+                line = sentences[i]
+                if debug:
+                    print 'line: %s' % line
+                match = re.search(
+                    'BUILD_' + which + '[ \t]*=[ \t]*(\w+)', line)
+                if match:
+                    if debug:
+                        print 'replace %s with %s' % (old, what)
+                    new_line = line.replace(old, what)
+                    sentences[i] = new_line
+
+
+def usage():
+    global myname
+    print """
+  %s is used to manipulate the platforms.mk file (in makesystem).
+
+  Usage:
+
+  %s
+  %s [-copy] [-false [target, ...]] [-true [targe, ...]]
+
+  Where,
+    -copy (or -c)     Copy platorms.mk.template platforms.mk
+    -false (or -f)    Sets all BUILD_xxx targets to false in platforms.mk
+    -false target(s)  Sets specified BUILD_xxx targets to false
+    -true (or -t)     Sets all BUILD_xxx targets to true
+    -true target(s)   Sets specified BUILD_xxx targets to true
+    -list (or -l)     List the current settings in platforms.mk
+
+  %s without any options will display a GUI
+
+  Example:
+    %s -c -f -t VMS610
+
+  will copy platforms.mk.template to platforms.mk, set all BUILD_xxx
+  targets to false, set BUILD_VMS610 to true, and then will print out
+  the new contents of platforms.mk
+
+  """ % (myname, myname, myname, myname, myname)
+
+
+def need_platforms_mk():
+    global platforms_mk
+    if not found_platform_mk:
+        print 'ERROR: unable to find %s, try -copy option' % platforms_mk
+        sys.exit()
+
+
+def get_arg_list(args, i):
+    global debug
+    if debug:
+        print 'in get_arg_list, i: %d' % i
+    arg_list = []
+    while (i + 1) < len(args) and not args[i + 1].startswith('-'):
+        i += 1
+        if debug:
+            print 'args[%d]: %s' % (i, args[i])
+        arg_list.append(args[i])
+    if debug:
+        print 'get_next_arg: arg_list: %s, i: %d' % (arg_list, i)
+    return (arg_list, i)
+
+
+def help_option(arg):
+    return arg == '-h' or arg == '-help' or arg == '--help'
+
+
+def debug_option(arg):
+    return arg == '-d' or arg == '-debug'
+
+
+def copy_option(arg):
+    return arg == '-c' or arg == '-copy'
+
+
+def false_option(arg):
+    return arg == '-f' or arg == '-false'
+
+
+def true_option(arg):
+    return arg == '-t' or arg == '-true'
+
+
+def list_option(arg):
+    return arg == '-l' or arg == '-list'
+
+
+aboutText = """<p>Copyright 2013 Arris Group, Inc.
+<br><br>platforms - version %(myversion)s
+<br><br>Author - David Swingle
+<br>Version %(python)s of <b>Python</b>.
+<br>Version %(wxpy)s of <b>wxPython</b>."""
+
+
+helpText = """<pre>
+
+<b>platforms</b> is used to manipulate the platforms.mk file (in makesystem).
+
+Usage:
+
+&nbsp&nbsp<b>platforms</b>
+or
+&nbsp&nbsp<b>platforms</b> [-list] [-copy] [-false [target, ...]]
+[-true [target, ...]]
+
+Where,
+
+&nbsp&nbsp<b>platforms</b> without any options will display this GUI
+
+</pre>
+<table>
+    <tr>
+        <td>&nbsp&nbsp<b>-copy</b> (or <b>-c</b>)</td>
+        <td>&nbsp&nbsp Copy platorms.mk.template platforms.mk</td>
+    </tr>
+    <tr>
+        <td>&nbsp&nbsp<b>-false</b> (or <b>-f</b>)</td>
+        <td>&nbsp&nbsp Sets all BUILD_xxx targets to false in platforms.mk</td>
+    </tr>
+    <tr>
+        <td>&nbsp&nbsp<b>-false target(s)</b></td>
+        <td>&nbsp&nbsp Sets specified BUILD_xxx targets to false</td>
+    </tr>
+    <tr>
+        <td>&nbsp&nbsp<b>-true</b> (or <b>-t</b>)</td>
+        <td>&nbsp&nbsp Sets all BUILD_xxx targets to true</td>
+    </tr>
+    <tr>
+        <td>&nbsp&nbsp<b>-true target(s)</b></td>
+        <td>&nbsp&nbsp Sets specified BUILD_xxx targets to true</td>
+    </tr>
+    <tr>
+        <td>&nbsp&nbsp<b>-list</b> (or <b>-l</b>)</td>
+        <td>&nbsp&nbsp Lists the current settings in platforms.mk</td>
+    </tr>
+</table>
+<br>
+<br>Example:
+<br>&nbsp&nbsp<b>platforms</b> -c -f -t VMS610
+<br>
+<br>will copy platforms.mk.template to platforms.mk, set all BUILD_xxx
+targets to false, set BUILD_VMS610 to true, and then will print out
+the new contents of platforms.mk
+"""
+
+
+class HtmlWindow(wx.html.HtmlWindow):
+    def __init__(self, parent, id, size=(600, 400)):
+        wx.html.HtmlWindow.__init__(self, parent, id, size=size)
+        if "gtk2" in wx.PlatformInfo:
+            self.SetStandardFonts()
+
+    def OnLinkClicked(self, link):
+        wx.LaunchDefaultBrowser(link.GetHref())
+
+
+class AboutBox(wx.Dialog):
+    def __init__(self, version):
+        wx.Dialog.__init__(
+            self, None, -1, "About platforms",
+            style=(wx.DEFAULT_DIALOG_STYLE | wx.THICK_FRAME |
+                   wx.RESIZE_BORDER | wx.TAB_TRAVERSAL))
+        hwin = HtmlWindow(self, -1, size=(250, 150))
+        vers = {}
+        vers["myversion"] = version
+        vers["python"] = sys.version.split()[0]
+        vers["wxpy"] = wx.VERSION_STRING
+        hwin.SetPage(aboutText % vers)
+        irep = hwin.GetInternalRepresentation()
+        hwin.SetSize((irep.GetWidth() + 25, irep.GetHeight() + 10))
+        self.SetClientSize(hwin.GetSize())
+        self.CentreOnParent(wx.BOTH)
+        self.SetFocus()
+
+
+class HelpBox(wx.Dialog):
+    def __init__(self):
+        wx.Dialog.__init__(
+            self, None, -1, "Help for platforms",
+            style=(wx.DEFAULT_DIALOG_STYLE | wx.THICK_FRAME |
+                   wx.RESIZE_BORDER | wx.TAB_TRAVERSAL))
+        hwin = HtmlWindow(self, -1, size=(600, 250))
+        hwin.SetPage(helpText)
+        irep = hwin.GetInternalRepresentation()
+        hwin.SetSize((irep.GetWidth() + 25, irep.GetHeight() + 10))
+        self.SetClientSize(hwin.GetSize())
+        self.CentreOnParent(wx.BOTH)
+        self.SetFocus()
+
+
+class Frame(wx.Frame):
+    def __init__(self, title):
+        global sentences
+        global build_re
+        global which_re
+        global true_false_re
+        wx.Frame.__init__(self, None, title=title, pos=(150, 150),
+                          size=(400, 720))
+        self.Bind(wx.EVT_CLOSE, self.on_exit)
+
+        menuBar = wx.MenuBar()
+        menu = wx.Menu()
+        m_exit = menu.Append(
+            wx.ID_EXIT, "E&xit\tAlt-X", "Close window and exit program.")
+        self.Bind(wx.EVT_MENU, self.on_exit, m_exit)
+        menuBar.Append(menu, "&File")
+        menu = wx.Menu()
+        m_about = menu.Append(
+            wx.ID_ABOUT, "&About", "Information about this program")
+        self.Bind(wx.EVT_MENU, self.OnAbout, m_about)
+        menuBar.Append(menu, "&Help")
+        m_help = menu.Append(wx.ID_HELP, "&Help", "Help for this program")
+        self.Bind(wx.EVT_MENU, self.OnHelp, m_help)
+        self.SetMenuBar(menuBar)
+
+        self.statusbar = self.CreateStatusBar()
+
+        panel = wx.Panel(self)
+        box = wx.BoxSizer(wx.VERTICAL)
+
+        widgets = []
+
+        btn = wx.Button(panel, label='Set all False', size=(110, 25))
+        self.Bind(wx.EVT_BUTTON, self.all_false, btn)
+        widgets.append((btn))
+        btn = wx.Button(panel, label='Set all True', size=(110, 25))
+        self.Bind(wx.EVT_BUTTON, self.all_true, btn)
+        widgets.append((btn))
+
+        widgets.append((wx.StaticText(panel)))
+        widgets.append((wx.StaticText(panel)))
+
+        for i in range(len(sentences)):
+            line = sentences[i]
+            build = build_re.search(line)
+            if build:
+                which = which_re.search(build.group())
+                true_false = true_false_re.search(build.group())
+                if which and true_false:
+                    st = wx.StaticText(panel, label=which.group())
+                    btn = wx.Button(
+                        panel, label=true_false.group(), size=(70, 25),
+                        name=which.group())
+                    self.Bind(wx.EVT_BUTTON, self.toggle, btn)
+                    widgets.append((st, 0, wx.ALIGN_RIGHT))
+                    widgets.append((btn))
+                    buttons.append(btn)
+            else:
+                st = wx.StaticText(panel, label=line)
+                widgets.append((st, 0))
+                widgets.append((wx.StaticText(panel)))
+
+        widgets.append((wx.StaticText(panel)))
+        widgets.append((wx.StaticText(panel)))
+
+        btn = wx.Button(panel, label='Save and Exit', size=(110, 25))
+        self.Bind(wx.EVT_BUTTON, self.save_exit, btn)
+        widgets.append((btn))
+        btn = wx.Button(panel, label='Exit (no save)', size=(110, 25))
+        self.Bind(wx.EVT_BUTTON, self.on_exit, btn)
+        widgets.append((btn))
+
+        fgs = wx.FlexGridSizer(len(widgets) / 2, 2, 1, 15)
+        fgs.AddMany(widgets)
+        fgs.AddGrowableCol(1, 1)
+        box.Add(fgs, proportion=1, flag=wx.EXPAND | wx.ALL, border=15)
+
+        panel.SetSizer(box)
+        panel.Layout()
+
+    def update_buttons(self, which):
+        global debug
+        global buttons
+        if debug:
+            print 'in update_buttons'
+        for btn in buttons:
+            btn.SetLabel(which)
+
+    def all_false(self, event):
+        global debug
+        global need_to_write
+        need_to_write = True
+        if debug:
+            print 'in all_false'
+        set_all('true', 'false')
+        self.update_buttons('false')
+
+    def all_true(self, event):
+        global debug
+        global need_to_write
+        need_to_write = True
+        if debug:
+            print 'in all_true'
+        set_all('false', 'true')
+        self.update_buttons('true')
+
+    def toggle(self, event):
+        global need_to_write
+        global sentences
+        global build_re
+        global which_re
+        global true_false_re
+        need_to_write = True
+        obj = event.GetEventObject()
+        name = obj.GetName()
+        value = obj.GetLabel()
+        if (value == 'false') or (value == 'FALSE'):
+            value = 'true'
+        else:
+            value = 'false'
+        obj.SetLabel(value)
+        for i in range(len(sentences)):
+            line = sentences[i]
+            build = build_re.search(line)
+            if build:
+                which = which_re.search(build.group())
+                if which and which.group() == name:
+                    true_false = true_false_re.search(build.group())
+                    if which and true_false:
+                        new_line = line.replace(true_false.group(), value)
+                        sentences[i] = new_line
+                        break
+
+    def save_exit(self, event):
+        global need_to_write
+        if need_to_write:
+            write_platforms_mk()
+            need_to_write = False
+        self.Destroy()
+
+    def on_exit(self, event):
+        global need_to_write
+        if need_to_write:
+            dlg = wx.MessageDialog(
+                self,
+                "There are unsaved changes.  Are you sure you want to exit?",
+                "Confirm Exit", wx.OK | wx.CANCEL | wx.ICON_QUESTION)
+            result = dlg.ShowModal()
+            dlg.Destroy()
+            if result == wx.ID_OK:
+                self.Destroy()
+        else:
+            self.Destroy()
+
+    def OnAbout(self, event):
+        global version
+        dlg = AboutBox(version)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def OnHelp(self, event):
+        dlg = HelpBox()
+        dlg.ShowModal()
+        dlg.Destroy()
+
+
+def window():
+    found_platform_mk = read_platforms_mk()
+    if not found_platform_mk:
+        copy_file()
+    found_platform_mk = read_platforms_mk()
+    if not found_platform_mk:
+        exit(-1)
+    app = wx.App(redirect=True)   # Error messages go to popup window
+    top = Frame("platforms")
+    top.Show()
+    app.MainLoop()
+    dump_sentences()
+
+
+args = sys.argv
+if len(args) > 1 and debug_option(args[1]):
+    print 'debugging is on'
+    debug = True
+    args.remove(args[1])
+wc_home = find_wc_home(cwd)
+found_platform_mk = read_platforms_mk()
+
+num_args = len(args)
+if debug:
+    print 'num_args: %d' % num_args
+if num_args == 1:
+    # windows version
+    if debug:
+        print 'call window'
+    window()
+    dump_sentences
+    exit(1)
+i = 1
+while i < num_args:
+    arg = args[i]
+    if debug:
+        print 'args[%d]: %s starts with -: %s' % (i, arg, arg.startswith('-'))
+    if debug_option(arg):
+        print 'debugging is on'
+        debug = True
+    elif help_option(arg):
+        usage()
+    elif list_option(arg):
+        break
+    elif copy_option(arg):
+        copy_file()
+        found_platform_mk = read_platforms_mk()
+    elif false_option(arg):
+        need_platforms_mk()
+        (arg_list, i) = get_arg_list(args, i)
+        process_file(arg_list, 'false')
+        need_to_write = True
+    elif true_option(arg):
+        need_platforms_mk()
+        (arg_list, i) = get_arg_list(args, i)
+        process_file(arg_list, 'true')
+        need_to_write = True
+    else:
+        print 'unknown argument: %s' % arg
+    i += 1
+if need_to_write:
+    write_platforms_mk()
+dump_sentences()

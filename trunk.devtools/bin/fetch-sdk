@@ -1,0 +1,185 @@
+#!/bin/bash
+
+set -eu
+
+usage() {
+   cat <<EOF
+Usage:
+    fetch-sdk [OPTION]... BRANCH[@REVISION] KITPRODUCT
+
+    This script builds and downloads an sdk/sdk++ for preferred branch from
+    http://kreatvkits.arrisi.com. Note that if no revision number is provided 
+    you get latest _build_, not latest _revision_, meaning that we may match 
+    an old revision if someone queued it. File $log 
+    is used to track which sdks have been downloaded. 
+
+Options:
+    BRANCH 
+           http://svn.arrisi.com/dev/bsg branch including
+           'branches'/'tags'.
+           Example: 'trunk', 'branches/DEV_123', 'tags/STABLE_1'
+    REVISION 
+           The branch revision. Example: '123456'
+    KITPRODUCT   
+           The kit product to be built and downloaded.
+           Example: 'kreatv4-sdk++-alefnula'
+    -h / --help
+           Show this help text.
+    -e / --edit
+           Edit file telling which SDKs have been downloaded (this would
+           be $log). This enables you to reset
+           downloads, thus allowing you to perform them again.
+    -d / --delete
+           Delete local copy of sdk after download. SDK is however
+           still marked as downloaded. Can be used to have SDK on
+           built server side but not keeping the local copy of it.
+    -l / --list
+           List possible KITPRODUCTS for a specified BRANCH[@REVISION].
+    -o / --output_path <path>
+           Put downloaded SDKs in specified path instead of in
+           current directory.
+
+Examples:
+    > fetch-sdk tags/STABLE_1 kreatv4-sdk++-alefnula
+
+    > fetch-sdk trunk@123456 kreatv4-sdk++-st40
+EOF
+}
+
+edit() {
+    if [[ -n "$EDITOR" ]]; then
+        $EDITOR $logfile
+    else 
+        emacs -nw $logfile
+    fi
+}
+
+
+help() {
+    cat <<EOF
+For usage information run: fetch-sdk -h
+EOF
+    exit 1
+}
+
+list() {
+    curl -s "http://kreatvkits.arrisi.com/$branch@${revision}?return=plainlist"
+}
+
+fetchsdk() {
+    if [[ -z "$revision" ]]; then
+        set +e
+        revision=$(wget -o /dev/null -O - "http://svn.arrisi.com/build_remote.php?action=latest_build_rev&repo=dev&project=bsg&branch=$branch" | grep . || echo "N/A")
+        set -e
+        if [ "$revision" == "N/A" ]; then
+            echo "Error: Could not find any built revision for $branch."
+            exit 1
+        fi
+    fi
+    logentry="$branch,$revision,$kitproduct"
+    touch $logfile
+    already_downloaded=$(grep "$logentry" -o $logfile || true)
+
+    if [ -z "$already_downloaded" ];then
+        curdir=$(pwd)
+        cd $path
+        echo "Trying to fetch $kitproduct for $branch@$revision..."
+
+        if [[ -n $delete ]]; then
+            wget --content-disposition "http://kreatvkits.arrisi.com/$branch@${revision}/${kitproduct}" -nv 2>&1 | tee .download_log
+            archive=$(cat .download_log |sed -e 's/\(.*\)"kreatv\(.\?\)-sdk\(.*\)"\(.*\)/kreatv\2-sdk\3/')
+            echo "Deleting downloaded archive $archive"
+            rm -f $archive
+            rm -f .download_log
+        else
+            wget --content-disposition "http://kreatvkits.arrisi.com/$branch@${revision}/${kitproduct}" \
+                || (echo "Error: Could not find kit product '$kitproduct', possible values are:" \
+                && list && exit 1)
+        fi
+
+        ### Download was successful, write to log:
+        echo "$logentry" >> $logfile
+
+        cd $curdir
+    else
+        echo "Kit product $kitproduct is already downloaded for $branch@$revision (according to file $logfile)."
+        echo "Did nothing..."
+        exit 0
+    fi
+}
+
+branch=
+kitproduct=
+path=.
+revision=
+delete=
+edit=
+list=
+log=.downloaded_sdks_in_current_dir
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 0
+fi
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -o|--output)
+            path=$2
+            shift 
+            ;;
+        -d|--delete)
+            delete=1
+            ;;
+        -e|--edit)
+            edit=1
+            ;;
+        -l|--list)
+            list=1
+            ;;
+        *)
+            if [[ -z "$branch" ]]; then
+                read branch revision <<<$(IFS="@"; echo $1)
+            elif [[ -z "$kitproduct" ]]; then
+                kitproduct=$1
+            else
+                echo "Error: Too many arguments"
+                help
+            fi
+            ;;
+    esac
+    shift
+done
+
+if [ ! -d "$path" ]; then
+    echo "Error: Directory $path does not exist"
+    help
+fi
+
+logfile=$path/$log
+
+if [[ -n "$edit" ]]; then
+    edit
+    exit 0
+fi
+
+if [[ -z $branch ]]; then
+    echo "Error: Missing BRANCH argument."
+    help
+fi
+
+if [[ -n "$list" ]]; then
+    list
+    exit 0
+fi
+
+if [[ -z $kitproduct ]]; then
+    echo "Error: Missing KITPRODUCT argument."
+    help
+fi
+
+fetchsdk

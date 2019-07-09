@@ -1,0 +1,9 @@
+#!/bin/sh
+
+preview_mmd=$(make getvar-BSG_SRC)/manuals/tools/preview_mmd
+if [ ! -x "$preview_mmd" ]; then
+    echo "Error: $preview_mmd doesn't exist. Make sure you run this tool on a rather new bsg branch." >&2
+    exit 1
+fi
+
+$preview_mmd "$@"

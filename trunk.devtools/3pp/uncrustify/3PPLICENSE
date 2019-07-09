@@ -1,0 +1,9 @@
+NAME=uncrustify
+VERSION=36a0f44c54ee6301a5a208a12c08f97e59fcaa42
+LICENSE=GPLv2
+ORIGIN=https://github.com/bengardner/uncrustify/archive/36a0f44c54ee6301a5a208a12c08f97e59fcaa42.tar.gz
+USAGE=Unrestricted
+FILENAME=uncrustify-36a0f44c54ee6301a5a208a12c08f97e59fcaa42.tar.gz
+SHA1=319fa2be1a9eacf327e565cc635f8679264329e8
+END_HEADER
+END_ATTRIBUTION

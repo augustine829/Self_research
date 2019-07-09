@@ -1,0 +1,32 @@
+#!/bin/bash
+
+rcd()
+{
+  local dir="$1"
+  [ "${dir:0:1}" == '/' ] || dir="$(wcroot)/$dir"
+  [ -d "$dir" ] || dir=$(dirname "$dir")
+  cd "$dir"
+}
+
+_rcd()
+{
+    local cur IFS=$'\n'
+    _get_comp_words_by_ref cur
+
+    compopt -o filenames
+
+    if [ "${cur:0:1}" == "/" ]; then
+      COMPREPLY=( $( compgen -d "$cur" ) )
+    else
+      local wcroot="$(wcroot)"
+      if [ "$(pwd)" == "$wcroot" ]; then
+        COMPREPLY=( $( compgen -d "$wcroot/$cur" | sed -e "s#$wcroot[/]*##" ) )
+      else
+        COMPREPLY=( $( compgen -S / -d "$wcroot/$cur" | sed -e "s#$wcroot[/]*##" ) )
+      fi
+    fi
+    return 0
+}
+
+complete -F _rcd -o nospace rcd
+

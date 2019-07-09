@@ -1,0 +1,67 @@
+#!/usr/bin/env python2
+
+import argparse
+import json
+import os
+import sys
+
+
+def update_kit_description(filepath, kit_name, kit_info):
+    parent_dir = os.path.dirname(filepath)
+    try:
+        os.makedirs(parent_dir)
+    except os.error:
+        if not os.path.isdir(parent_dir):
+            print >> sys.stderr, ('Error: could not create "%s"' %
+                                  parent_dir)
+            sys.exit(1)
+    data = {kit_name: kit_info}
+    json.dump(data, open(filepath, 'w'), indent=4, sort_keys=True)
+
+
+def register_on_demand_kit(args):
+    kit_name = args['kit-path']
+    kit_info = {'type': 'on-demand',
+                'test-builds-3pp-code': args['test_builds_3pp_code']}
+    update_kit_description(args['description_file'], kit_name, kit_info)
+
+
+def register_always_built_kit(args):
+    kit_name = args['kit-path']
+    kit_info = {'type': 'always-built',
+                'product-filename': args['product_filename']}
+    update_kit_description(args['description_file'], kit_name, kit_info)
+
+
+def main():
+    main_parser = argparse.ArgumentParser(
+        description=('Add or modify a kit entry in a file that describes all '
+                     'deliverable kits. This file is used by the on-demand '
+                     'kit build system and kreatvkits.arrisi.com.'))
+    subparsers = main_parser.add_subparsers()
+
+    # ./create_deliverable_kit_description on-demand ...
+    on_demand_parser = subparsers.add_parser('on-demand')
+    on_demand_parser.add_argument('--test-builds-3pp-code',
+                                  action='store_true')
+    on_demand_parser.set_defaults(func=register_on_demand_kit)
+
+    # ./create_deliverable_kit_description always-built ...
+    always_built_parser = subparsers.add_parser('always-built')
+    always_built_parser.add_argument('--product-filename',
+                                     metavar='PRODUCT_FILENAME',
+                                     required=True)
+    always_built_parser.set_defaults(func=register_always_built_kit)
+
+    # Common arguments
+    for parser in [on_demand_parser, always_built_parser]:
+        parser.add_argument('--description-file',
+                            metavar='DESCRIPTION_FILE',
+                            required=True)
+        parser.add_argument('kit-path', metavar='KIT_PATH')
+
+    args = main_parser.parse_args()
+    args.func(vars(args))
+
+
+main()

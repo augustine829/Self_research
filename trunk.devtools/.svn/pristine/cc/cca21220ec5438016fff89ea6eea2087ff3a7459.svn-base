@@ -1,0 +1,17 @@
+#!/bin/sh
+
+workflex=$(dirname $0)/workflex
+
+if ! type iconv >/dev/null 2>&1; then
+    echo "$(basename $0): Error: couldn't find iconv in PATH"
+    exit 1
+fi
+
+if [ $# -ne 1 ]; then
+    echo 'workflex-utf8 is a wrapper around workflex that works with UTF-8'
+    echo 'formatted input and output'
+    echo
+    $workflex | iconv -f ISO_8859-1 -t UTF-8
+else
+    iconv -f UTF-8 -t ISO_8859-1 $1 | $workflex - | iconv -f ISO_8859-1 -t UTF-8
+fi

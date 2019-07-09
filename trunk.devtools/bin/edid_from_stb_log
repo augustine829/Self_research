@@ -1,0 +1,109 @@
+#!/usr/bin/python
+
+import argparse
+import re
+import struct
+import subprocess
+
+EDID_PARSER_BINARY = 'edid-decode'
+EDID_SIZE = 512
+
+parser = argparse.ArgumentParser(description='Parse EDID from Motorola log.')
+parser.add_argument('log_file_name', nargs=1,
+                    help='Motorola log file name')
+parser.add_argument('--quantum-xml', action='store_const',
+                    const=True, default=False,
+                    help='Print EDID XML for Quantum HDMI analyzer')
+args = parser.parse_args()
+
+log_file_name = args.log_file_name[0]
+edid_hex_data = []
+
+f = open(log_file_name)
+hexdump_start_found = False
+for line in f:
+    line = line.strip()
+    if line.endswith('Edid hexdump:') or line.endswith('EDID dump:'):
+        hexdump_start_found = True
+        continue
+
+    if not hexdump_start_found:
+        continue
+
+    m = re.search('(?:Note|INFO):(( [0-9A-Fa-f][0-9A-Fa-f]){64})$', line)
+    if m:
+        hex_values = m.group(1).split()
+        edid_hex_data.extend([int(x, 16) for x in hex_values])
+        if len(edid_hex_data) == EDID_SIZE:
+            break
+        continue
+
+    m = re.search('(?:Note|INFO): (?:.*DumpEdid: )?([0-9A-Fa-f]{128})$', line)
+    if m:
+        edid_hex_data.extend([int(m.group(1)[x:x + 2], 16)
+                              for x in range(0, 128, 2)])
+        if len(edid_hex_data) == EDID_SIZE / 2:
+            edid_hex_data.extend(EDID_SIZE / 2 * [0])
+            break
+        continue
+
+    exit('Expected EDID data on line %r, but got something else' % line)
+
+if len(edid_hex_data) == 0:
+    exit('No EDID information found in %r' % log_file_name)
+
+assert len(edid_hex_data) == EDID_SIZE
+
+if args.quantum_xml:
+    print '<DATAOBJ>'
+    print ' <HEADER TYPE="DID" VERSION="1.0"/>'
+    print ' <DATA>'
+    for block_num in range(4):
+        print '  <BLOCK%d>%s</BLOCK%d>' % (
+            block_num,
+            "".join(["%.2X" % x for x in edid_hex_data[
+                block_num * 128:block_num * 128 + 128]]),
+            block_num)
+    print ' </DATA>'
+    print '</DATAOBJ>'
+    exit(0)
+
+if subprocess.call(['which', EDID_PARSER_BINARY],
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+    p = subprocess.Popen(EDID_PARSER_BINARY, stdin=subprocess.PIPE)
+    if not p:
+        exit('Failed to launch %s' % EDID_PARSER_BINARY)
+
+    p.communicate("".join([chr(x) for x in edid_hex_data]))
+else:
+    print 'Edid parser %r not found.' % EDID_PARSER_BINARY
+    print 'You may want to do "yum install xorg-x11-utils"'
+
+manufacturer_eisa_id_map = {
+    'ACR': 'Acer',
+    'BNQ': 'BenQ',
+    'DON': 'Denon',
+    'GSM': 'LG',
+    'MEI': 'Panasonic',
+    'PHL': 'Philips',
+    'SAM': 'Samsung',
+    'SNY': 'Sony',
+    'SWE': 'SWEDX',
+    'TSB': 'Toshiba',
+    'VSC': 'ViewSonic'
+}
+
+fixed_edid_header = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+assert edid_hex_data[:len(fixed_edid_header)] == fixed_edid_header
+
+manufacturer_id = struct.unpack('>H', chr(edid_hex_data[8]) +
+                                chr(edid_hex_data[9]))[0]
+assert manufacturer_id & 0x8000 == 0
+manufacturer_string = ''
+for c in reversed(range(3)):
+    manufacturer_string += chr(((manufacturer_id >> (c * 5)) & 0x1f) + 64)
+if manufacturer_string in manufacturer_eisa_id_map:
+    print 'Manufacturer: %s (%s)' % (
+        manufacturer_string, manufacturer_eisa_id_map[manufacturer_string])
+else:
+    print 'Manufacturer EISA ID:', manufacturer_string

@@ -1,0 +1,82 @@
+#!/usr/bin/perl
+
+use threads;
+use strict;
+
+my $mode = shift;
+my $verbose = ($mode eq '-v');
+my $compact = ($mode eq '-c');
+
+my @servers=(
+    "aultmore.lab.swelin.arrisi.com",
+    "balblair.lab.swelin.arrisi.com",
+    "benromach.lab.swelin.arrisi.com",
+    "bladnoch.lab.swelin.arrisi.com",
+    "brora.lab.swelin.arrisi.com",
+    "caperdonich.lab.swelin.arrisi.com",
+    "cardhu.lab.swelin.arrisi.com",
+    "craigellachie.lab.swelin.arrisi.com",
+    "littlemill.lab.swelin.arrisi.com",
+    "mortlach.lab.swelin.arrisi.com",
+    "rosebank.lab.swelin.arrisi.com",
+    "scapa.lab.swelin.arrisi.com",
+);
+
+sub check_server
+{
+    my $server = shift;
+    my $cmd = <<END;
+    cat /etc/redhat-release;
+    arch;
+    uptime;
+    nproc;
+    w | tail -n +3 | cut -f 1 -d ' ' | sort | uniq | wc -l;
+    df -h /extra | tail -1;
+    ps -eo pcpu | egrep '([0-9][0-9][0-9]|[0-9][0-9]\.[0-9])\$' | wc -l
+END
+    open(SSH, "ssh -o 'StrictHostKeyChecking no' -q $server \"". $cmd . "\" 2>/dev/null |");
+    my %s;
+    chomp(my $release = <SSH>);
+    $s{release} = $release;
+    chomp(my $arch = <SSH>);
+    $s{arch} = $arch;
+    print "$server: $release, $arch\n" if $verbose;
+    chomp(my $load = <SSH>);
+    $load =~ /.*load average: ([0-9.]+), ([0-9.]+), ([0-9.]+)$/;
+    $s{load1} = $1;
+    $s{load5} = $2;
+    $s{load15} = $3;
+    $s{processors} = <SSH>;
+    chomp($s{users} = <SSH>);
+    my @disk = split(/\s+/, <SSH>);
+    $s{avail} = $disk[3];
+    chomp($s{active} = <SSH>);
+    close(SSH);
+    return \%s;
+}
+
+my %threads;
+my $max_len = 0;
+
+my %info;
+foreach my $server (@servers) {
+    $max_len = length($server) if (length($server) > $max_len);
+    $threads{$server} = threads->create(\&check_server, $server);
+}
+
+foreach my $t (keys %threads) {
+    $info{$t} = $threads{$t}->join();
+}
+
+print "\n" if $verbose;
+foreach (sort { $info{$a}{load15} <=> $info{$b}{load15} } keys(%info)) {
+    my %i = %{$info{$_}};
+    if ($compact) {
+        print "$_ $i{load1} $i{load5} $i{load15} $i{users} $i{processors} ",
+              "$i{avail} $i{active}\n";
+    }
+    else {
+        printf("%${max_len}s: load %2.2f, users %2d, cores %2d, active processes %d\n", 
+               $_, $i{load15}, $i{users}, $i{processors}, $i{active});
+    }
+}

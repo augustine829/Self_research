@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2014 ARRIS Enterprises, Inc. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, Inc.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+import re
+import sys
+
+from os.path import dirname, realpath
+
+sys.path.insert(0, dirname(realpath(__file__)) + "/..")
+from pycommon.svnuserscache import get_svn_users
+
+
+def color(*codes):
+    return "\033[" + ";".join(str(x) for x in codes) + "m"
+
+RESET = 0
+BOLD = 1
+RED = 31
+GREEN = 32
+YELLOW = 33
+BLUE = 34
+WHITE = 37
+
+STATUS_COLORS = {
+    "A": color(GREEN),
+    "C": color(BOLD, RED),
+    "D": color(RED),
+    "I": color(WHITE),
+    "M": color(BOLD, YELLOW),
+    "R": color(BOLD, YELLOW),
+    "X": color(WHITE),
+    "?": color(BOLD),
+    "!": color(BOLD),
+    "~": color(BOLD, RED),
+}
+PROP_STATUS_COLORS = {
+    "C": color(BOLD, RED),
+    "M": color(BOLD, YELLOW),
+}
+
+is_tty = None
+
+
+def warning(message):
+    sys.stderr.write("prettysvn: warning: {0}\n".format(message))
+
+
+def write(data):
+    if isinstance(data, unicode):
+        data = data.encode("utf-8")
+    sys.stdout.write(data)
+
+
+def write_colorized(line, color_string):
+    if is_tty:
+        write(color_string + line.rstrip("\n") + color(RESET) + "\n")
+    else:
+        write(line)
+
+
+def format_user(entry):
+    (first, last) = (entry["name"], entry["surname"])
+    if first or last:
+        name = re.sub(u" +", u" ", u"{0} {1}".format(first, last)).strip()
+    else:
+        name = "<Unknown>"
+    return name
+
+
+def expand_username(svnusers, username):
+    if username in svnusers:
+        return u"{0} ({1})".format(format_user(svnusers[username]), username)
+    else:
+        return username
+
+
+def prettify_blame(line):
+    svnusers = get_svn_users()
+    m = re.match(ur"(?u)^\s*(?P<rev>\d+)\s+(?P<username>\S+)(?P<tail>.*)$",
+                 line)
+    if m:
+        username = m.group("username")
+        if username in svnusers:
+            user = u"%s (%s)" % (format_user(svnusers[username]), username)
+        else:
+            user = unicode(username)
+        line = u"{0:6}   {1:40}{2}\n".format(
+            m.group("rev"), user, m.group("tail"))
+    write(line.strip() + "\n")
+
+
+def prettify_diff(line):
+    if re.match(r"^ ", line):
+        write(line)
+    elif re.match(r"^@", line):
+        write_colorized(line, color(BLUE))
+    elif re.match(r"^-", line):
+        write_colorized(line, color(RED))
+    elif re.match(r"^\+", line):
+        write_colorized(line, color(GREEN))
+    else:
+        write_colorized(line, color(BOLD, WHITE))
+
+
+def prettify_log(line):
+    svnusers = get_svn_users()
+    if re.match(r"^-{72}$", line):
+        write_colorized(line, color(WHITE))
+        return
+    else:
+        m = re.match(ur"(?u)^(?P<head>r\d+ \| )(?P<username>\S+)(?P<tail>.*)",
+                     line)
+        if m:
+            user = expand_username(svnusers, m.group("username"))
+            line = m.group("head") + user + m.group("tail") + "\n"
+            write_colorized(line, color(YELLOW))
+        else:
+            write(line)
+
+
+def prettify_status(line):
+    if re.match("^       C", line):  # Tree conflict
+        write_colorized(line, color(BOLD, RED))
+    elif re.match("^ [^ ]    ", line):  # Property change
+        write_colorized(line, PROP_STATUS_COLORS[line[1]])
+    elif re.match("^[^ ]. .  ", line):  # Other change
+        write_colorized(line, STATUS_COLORS[line[0]])
+    else:
+        write(line)
+
+
+def main():
+    assert len(sys.argv) == 3
+    mode = sys.argv[1]
+    assert mode in ["blame", "diff", "log", "status"]
+    global is_tty
+    is_tty = sys.argv[2] == "True"
+    prettifier = globals()["prettify_" + mode]
+    for line in sys.stdin:
+        try:
+            line = line.decode("utf-8")
+        except UnicodeDecodeError:
+            line = line.decode("latin1")
+        prettifier(line)
+
+
+try:
+    main()
+except (KeyboardInterrupt, IOError):
+    pass

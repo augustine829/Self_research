@@ -1,0 +1,136 @@
+#!/usr/bin/env python2
+
+# Copyright (c) 2016 ARRIS Enterprises, LLC. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, LLC.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+import optparse
+import os
+import subprocess
+import sys
+
+from os.path import dirname, realpath
+
+sys.path.insert(0, dirname(realpath(__file__)) + '/../lib/pycommon')
+
+import common
+import devhub
+import gitcommon
+import refname
+
+
+cmdline_branch = None
+cmdline_options = None
+
+
+def _fail(short_message):
+    sys.exit('Error: %s' % short_message)
+
+
+def _parse_args():
+    global cmdline_branch
+    global cmdline_options
+
+    parser = optparse.OptionParser(
+        usage='git diff-branch [OPTIONS] [BRANCH]',
+        description=('%prog prints a diff with the changes done on BRANCH '
+                     'to stdout.'))
+
+    parser.add_option('-b', '--base-branch',
+                      default=None,
+                      help='use a specific base branch for diff generation')
+    parser.add_option('-C',
+                      dest='repo_dir', default='.',
+                      help=('run the command in REPO_DIR instead of current '
+                            'working directory'))
+
+    options, positional_args = parser.parse_args()
+
+    if len(positional_args) > 1:
+        _fail('Expected at most one positional argument (BRANCH).')
+
+    if not os.path.isdir(options.repo_dir):
+        _fail('Expected -C REPO_DIR to be an existing directory.')
+
+    cmdline_branch = positional_args[0] if positional_args else None
+    cmdline_options = options
+
+
+def _fail_with_fetch_suggestion(branch):
+    cmd = 'git fetch origin "+refs/{0}:refs/{0}"'.format(branch)
+    if cmdline_options.repo_dir != '.':
+        cmd = '(cd {0}; {1})'.format(cmdline_options.repo_dir, cmd)
+
+    _fail('''\
+The branch {0} does not exist locally.
+
+You might have to fetch the branch from the remote repository:
+
+    {1}
+'''.format(branch, cmd))
+
+
+def _fail_with_base_branch_suggestion(msg):
+    _fail('''\
+{0}
+
+You can specify a base branch manually using the --base-branch option. \
+See git-diff-branch --help.'''.format(msg))
+
+
+def _get_branch_diff_command_components():
+    try:
+        repo = gitcommon.get_repo_name()
+        if cmdline_branch:
+            branch = gitcommon.branch_tuple(cmdline_branch)
+        else:
+            branch = gitcommon.branch_tuple(gitcommon.get_repo_branch_name())
+    except common.ExecutionError as e:
+        _fail(str(e))
+
+    if cmdline_options.base_branch:
+        base_branch = gitcommon.branch_tuple(cmdline_options.base_branch)
+    else:
+        try:
+            parent = devhub.get_branch_parent(repo, branch.simplified_branch)
+            if parent is None:
+                _fail(
+                    'The branch does not have a registered parent on devhub '
+                    'that can be used as base branch when generating the '
+                    'diff.')
+            base_branch = gitcommon.branch_tuple("origin/{0}".format(parent))
+        except common.ExecutionError as e:
+            _fail_with_base_branch_suggestion(str(e))
+
+    return repo, base_branch.branch, branch.branch
+
+
+def main():
+    _parse_args()
+
+    os.chdir(cmdline_options.repo_dir)
+    if not gitcommon.is_inside_work_tree():
+        _fail('Could not find a Git work tree at ' + os.getcwd())
+
+    repo, base_branch, branch = _get_branch_diff_command_components()
+
+    if not refname.RefName(branch).exists():
+        _fail_with_fetch_suggestion(branch)
+    if not refname.RefName(base_branch).exists():
+        _fail_with_fetch_suggestion(base_branch)
+
+    diff_cmd = ['git', 'diff', '{0}...{1}'.format(base_branch, branch)]
+
+    # Adding information to the diff header for codemapper to use.
+    print "Repository:", repo
+    print "Base branch:", base_branch
+    print "Branch:", branch
+    print
+    sys.stdout.flush()
+    subprocess.call(diff_cmd)
+
+
+main()

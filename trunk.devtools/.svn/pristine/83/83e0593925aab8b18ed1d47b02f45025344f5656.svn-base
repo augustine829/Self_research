@@ -1,0 +1,132 @@
+#!/bin/bash
+
+set -e
+set -u
+
+export NO_ICECC=true
+
+function build
+{
+    local TMPDIR=${1}
+    local JOBS=${2}
+
+    if make -C ${TMPDIR} -j ${JOBS} &> ${TMPDIR}.log; then
+        # Success
+        touch ${TMPDIR}/build_was_successful
+    fi
+}
+
+function run_suite
+{
+    local DIR=${1}
+    local JOBS=${3}
+    local BUILDS=${4}
+    local TMPDIRS=`seq -f ${1}.test${2}.%g ${BUILDS}`
+
+    local T
+    for T in ${TMPDIRS}; do
+        rm -rf ${T}
+        cp -al ${DIR} ${T}
+    done
+    local START=$(date '+%s')
+    for T in ${TMPDIRS}; do
+        build ${T} ${JOBS} &
+    done
+    wait
+    echo "$(expr \( $(date '+%s') - ${START} \) / 60 / ${BUILDS} ) minutes per build"
+    for T in ${TMPDIRS}; do
+        if [ ! -f ${T}/build_was_successful ]; then
+            echo "Error: build ${T} failed"
+        fi
+        rm -rf ${T}
+    done
+}
+
+function usage
+{
+    echo "Usage: $0 [options] <dir> ..."
+    echo "Options:"
+    echo "  -h    Print this message and exit"
+    echo "  -i N  Set number of iterations (default 1)"
+    echo "  -j N  Allow N jobs at once; forwarded to 'make'"
+    echo "  -s N  Run N simultaneous builds at one"
+    echo
+    echo "'-jN -jM' may be shortened to '-jN,M'"
+    echo "'-sN -sM' may be shortened to '-sN,M'"
+    echo
+    echo "The number of '-j' options must equal the number of '-s' options"
+    echo
+    echo "This program was created for answering the following two questions:"
+    echo " 1. How many jobs per build (make -j N) should be used on this host?"
+    echo " 2. How many simultaneous builds should be used on this host?"
+    echo
+    echo "Example usage: $0 -s1,1,2,2 -j2,4,2,4 -i3 DEV_maintenance"
+    exit 1
+}
+
+# Declare as arrays
+declare -a JOBS_PER_BUILD
+declare -a SIMULTANEOUS_BUILDS
+
+NUM_ITERATIONS=1
+while getopts  "hi:j:s:" flag
+do
+    case $flag in
+        h)
+            usage
+            ;;
+        i)
+            NUM_ITERATIONS=${OPTARG}
+            ;;
+        j)
+            # Append comman-separated values to array
+            IFS=","
+            for N in ${OPTARG}; do
+                JOBS_PER_BUILD+=( ${N} )
+            done
+            unset IFS
+            ;;
+        s)
+            # Append comma-separated values to array
+            IFS=","
+            for N in ${OPTARG}; do
+                SIMULTANEOUS_BUILDS+=( ${N} )
+            done
+            unset IFS
+            ;;
+    esac
+    shift $((OPTIND - 1))
+    OPTIND=1
+done
+if [ ${#JOBS_PER_BUILD[*]} -eq 0 ]; then
+    JOBS_PER_BUILD[0]=1
+fi
+
+if [ ${#SIMULTANEOUS_BUILDS[*]} -eq 0 ]; then
+    SIMULTANEOUS_BUILDS[0]=1
+fi
+if [ ${#JOBS_PER_BUILD[*]} -ne ${#SIMULTANEOUS_BUILDS[*]} ]; then
+    echo "Error: The number of '-j' options must equal the number of '-s' options"
+    exit 1
+fi
+if [ $# -eq 0 ]; then
+    usage
+fi
+while [ $# -gt 0 ]; do
+    DIR=${1%/}
+    for I in `seq ${NUM_ITERATIONS}`; do
+        DATE=$(date '+%F %T')
+        HOST=$(hostname)
+        URL=$(svn info ${DIR} | awk '/^URL:/ { print $2 }')
+        REVISION=$(svn info ${DIR} | awk '/^Last Changed Rev:/ { print $4 }')
+        echo "${DATE} ${HOST} ${URL} ${REVISION}"
+        for N in `seq ${#JOBS_PER_BUILD[*]}`; do
+            TEST=$(((I - 1) * ${#JOBS_PER_BUILD[*]} + N))
+            JOBS=${JOBS_PER_BUILD[$((N - 1))]}
+            BUILDS=${SIMULTANEOUS_BUILDS[$((N - 1))]}
+            echo -n "test=${TEST} builds=${BUILDS} jobs_per_build=${JOBS}: "
+            run_suite ${DIR} ${TEST} ${JOBS} ${BUILDS}
+        done
+    done
+    shift
+done

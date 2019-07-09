@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Wrapper script to auto detect which review tool that should be used.
+
+
+is_git_repo=false
+is_svn_repo=false
+
+if git rev-parse --is-inside-work-tree >&/dev/null; then
+    is_git_repo=true
+fi
+
+if svn --non-interactive info >&/dev/null; then
+    is_svn_repo=true
+fi
+
+if [ "$is_git_repo" == true ] && [ "$is_svn_repo" == true ]; then
+    cat <<EOF
+Detected both a svn and a git repo in the current working directory.
+Unable to automatically run the correct tool.
+* If using git, use "review-git".
+* If using svn, use "review-svn".
+EOF
+    exit 1
+fi
+
+bindir=$(dirname $0)
+if [ "${is_git_repo}" == true ]; then
+    exec $bindir/review-git "$@"
+elif [ "${is_svn_repo}" == true ]; then
+    exec $bindir/review-svn "$@"
+elif [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+    cat <<EOF
+Could not detect repository type.
+For Git usage help: review-git -h
+For SVN usage help: review-svn -h
+EOF
+else
+    cat <<EOF
+Could not detect repository type. Please, do one of the following:
+* If using git, stand in your working copy.
+* If using svn, either stand in your working copy or use "review-svn" directly.
+EOF
+    exit 2
+fi

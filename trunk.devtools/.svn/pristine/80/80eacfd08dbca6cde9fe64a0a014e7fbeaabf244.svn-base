@@ -1,0 +1,11 @@
+#!/usr/bin/env python2
+
+import sys
+
+from os.path import dirname, join, realpath
+
+bin_dir = dirname(realpath(__file__))
+sys.path.insert(0, join(bin_dir, '..', 'lib', 'diff_branch'))
+import diff_branch
+
+sys.exit(diff_branch.main())

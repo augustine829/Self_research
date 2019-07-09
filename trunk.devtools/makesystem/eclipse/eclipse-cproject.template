@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?fileVersion 4.0.0?>
+<cproject>
+  <storageModule moduleId="org.eclipse.cdt.core.settings">
+<cconfiguration id="org.eclipse.cdt.core.default.config.all">
+  <storageModule
+     buildSystemId="org.eclipse.cdt.core.defaultConfigDataProvider"
+     id="org.eclipse.cdt.core.default.config.all"
+     moduleId="org.eclipse.cdt.core.settings"
+     name="Configuration">
+    <externalSettings/>
+    <extensions>
+      <extension id="org.eclipse.cdt.core.ELF"
+		 point="org.eclipse.cdt.core.BinaryParser"/>
+      <extension id="org.eclipse.cdt.core.GNU_ELF"
+		 point="org.eclipse.cdt.core.BinaryParser">
+	<attribute key="addr2line" value="addr2line"/>
+	<attribute key="c++filt" value="c++filt"/>
+      </extension>
+    </extensions>
+  </storageModule>
+  <storageModule moduleId="org.eclipse.cdt.core.language.mapping">
+    <project-mappings/>
+  </storageModule>
+  <storageModule moduleId="org.eclipse.cdt.core.externalSettings"/>
+  <storageModule moduleId="org.eclipse.cdt.core.pathentry">
+    <pathentry exclude="host/|vip1903/|vip2000/" kind="src" path=""/>
+    <pathentry kind="out" path="host/"/>
+    <pathentry kind="out" path="vip1903/"/>
+    <pathentry kind="out" path="vip2000/"/>
+    <pathentry kind="con" path="org.eclipse.cdt.make.core.DISCOVERED_SCANNER_INFO"/>
+  </storageModule>
+  <storageModule moduleId="org.eclipse.cdt.make.core.buildtargets">
+    <buildTargets>
+      <target name="local_all VIP1903" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>/usr/bin/make</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=vip1903 local_all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="all VIP1903" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>
+	  /usr/bin/make
+	</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=vip1903 all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="local_all VIP2000" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>/usr/bin/make</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=vip2000 local_all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="all VIP2000" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>
+	  /usr/bin/make
+	</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=vip2000 all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="local_all test" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>/usr/bin/make</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=host local_all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="all test" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>
+	  /usr/bin/make
+	</buildCommand>
+	<buildArguments/>
+	<buildTarget>VERBOSE=1 TARGET=host all</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="local_clean" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>
+	  /usr/bin/make
+	</buildCommand>
+	<buildArguments/>
+	<buildTarget>local_clean</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+      <target name="clean" path="" targetID="org.eclipse.cdt.make.MakeTargetBuilder">
+	<buildCommand>
+	  /usr/bin/make
+	</buildCommand>
+	<buildArguments/>
+	<buildTarget>clean</buildTarget>
+	<stopOnError>true</stopOnError>
+	<useDefaultCommand>true</useDefaultCommand>
+      </target>
+    </buildTargets>
+  </storageModule>
+  <storageModule moduleId="scannerConfiguration">
+    <autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="org.eclipse.cdt.make.core.GCCStandardMakePerProjectProfile"/>
+    <profile id="org.eclipse.cdt.make.core.GCCStandardMakePerProjectProfile">
+      <buildOutputProvider>
+	<openAction enabled="true" filePath=""/>
+	<parser enabled="true"/>
+      </buildOutputProvider>
+      <scannerInfoProvider id="specsFile">
+	<runAction arguments="-E -P -v -dD ${plugin_state_location}/${specs_file}" command="gcc" useDefault="true"/>
+	<parser enabled="false"/>
+      </scannerInfoProvider>
+    </profile>
+  </storageModule>
+</cconfiguration>
+  </storageModule>
+</cproject>

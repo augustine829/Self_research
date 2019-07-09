@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# --------------------------------------------------------------------------- #
+#                                                                             #
+#                                svnkd3merge                                  #
+#                      Copyright (c) 2007 - Motorola Inc.                     #
+#                                                                             #
+#                         MOTOROLA INTERNAL USE ONLY                          #
+#                                                                             #
+# Description:                                                                #
+#                                                                             #
+# This script enhances default "svn merge" command performance, by            #
+# integrating svn with the graphical 3-way merging tool kdiff3.               #
+#                                                                             #
+# Example usage:                                                              #
+#                                                                             #
+# svn merge -c 50474 "http://svn/branches/mybranch" --diff3-cmd svnkd3merge   #
+#                                                                             #
+# This command will open kdiff3 merging tool for every file to be merged.     #
+# Manual intervention is allowed to control how the merge is to be performed. #
+# Once the resulting file is as expected, ^s will save the result, and ^q will#
+# exit the tool, saving the merge result.                                     #
+#                                                                             #
+# Author: Anton Gomez (anton@motorola.com)                                    #
+#                                                                             #
+# --------------------------------------------------------------------------- #
+
+MYNAME=$(basename $0)
+
+KD3_CMD=$(which kdiff3 2>/dev/null)
+
+if [ "$KD3_CMD" == "" ]
+then
+    echo "ERROR: $MYNAME requires kdiff3 command to be available on the system."
+    echo "       Please, verify your installation."
+    exit 1
+fi
+
+# This was the file modified by change's author
+base=${10}
+base_label=${6}
+
+# This was the result of his change as the author saw it.
+changed=${11}
+changed_label=${8}
+
+# This is your own copy of the file, where you want the change merged in.
+working=${9}
+
+tmpfile=$(mktemp /tmp/svnmerge.XXXXXXXXXX)
+
+$KD3_CMD -L $base_label -L $changed_label -L "Your current version" $base $changed $working -o $tmpfile > /dev/null 2>&1
+cat $tmpfile
+rm $tmpfile
+

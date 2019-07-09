@@ -1,0 +1,361 @@
+#!/usr/bin/perl
+
+use FindBin;
+use lib $FindBin::Bin;
+
+use strict;
+use warnings FATAL => 'all';
+
+use Errno;
+use Fcntl qw(S_ISLNK);
+use File::Basename qw(basename dirname);
+use File::Copy qw(move);
+use File::Path qw(mkpath);
+use File::Temp qw(tempfile);
+use File::stat qw(lstat stat);
+use KreaTV;
+
+# Global variables
+my $preserve_source_dir = "";
+my $non_recursive = 0;
+my $verbose = $ENV{VERBOSE};
+my @exclude;
+my @include;
+my $flatten = 0;
+my $dereference = 0;
+my $comp_toolchain = $ENV{TOOLCHAIN} || "";
+my $comp_device = $ENV{DEVICE} || "";
+my $comp_flavour = $ENV{FLAVOUR} || "";
+my $comp_info = $comp_device || $comp_toolchain;
+$comp_info .= "/$comp_flavour" if $comp_flavour;
+$comp_info = " [$comp_info]" if $comp_info;
+
+my ($tempfd, $tempname);
+
+sub help {
+    print <<'EOF';
+Usage:
+    1. dist_targets [options] source [source ...] dest_dir
+    2. dist_targets [options] --rename source_file dest_file
+    3. dist_targets [options] --symlink link_target dest_link
+
+The purpose of dist_targets is to "dist" files (i.e. copy files into the dist
+directory) and to record the disted files so that the build system can maintain
+a list of files disted by each component (stored in
+$(BSG_SRC)/dist/distfiles/$(COMPONENT).dist).
+
+The first form copies the source files/directories into dest_dir. Directories
+are by default traversed recursively. The destination directory is created if
+it does not already exist. This form is conceptually equivalent to this
+command:
+
+    mkdir -p dest_dir && cp -af source [source ...] dest_dir
+
+The second form copies a single file and gives it a new name. This form is
+conceptually equivalent to this command:
+
+    mkdir -p $(dirname dest_file) && cp source_file dest_file
+
+The third form creates a symlink. This form is conceptually equivalent to this
+command:
+
+    mkdir -p $(dirname dest_link) && ln -sfn link_target dest_link
+
+Options for all forms:
+    --exclude=REGEXP Only dist file if its path does not match REGEXP. Can be
+                     given multiple times.
+    --include=REGEXP Only dist file if its path matches REGEXP. Can be given
+                     multiple times.
+    --match=REGEXP   Same as --include=REGEXP.
+
+Options for the first form:
+    --dereference    Follow symlinks.
+    --flatten        Do not create any directories under destination.
+    --non-recursive  Do not recurse in subdirectories.
+    --parents        Keep full source file directory under destination.
+EOF
+}
+
+# cleanpath(path)
+sub cleanpath {
+    my $path = shift;
+    $path =~ s!/{2,}!/!g;
+    $path =~ s!(^|/)\./!$1!g;
+    return $path;
+}
+
+# dist(source, dest)
+sub dist {
+    my ($source, $dest) = @_;
+    $dest = cleanpath($dest);
+    while ($dest =~ s!(^|/)[^/]+/\.\./!$1!) {
+        # a/b/../c/d/../e --> a/c/e
+    }
+    $dest =~ s!^(|.*?/)dist/!!;
+    if ($dest =~ /\s/) {
+        KreaTV::error("dist_targets: destination path \"dist/$dest\" contains"
+                      . " whitespace");
+    }
+
+    my $stat = KreaTV::lstat($source);
+    my $type = S_ISLNK($stat->{mode}) ? "symlink": "file";
+    my $dist_info = "$dest type=$type size=$stat->{size} mtime=$stat->{mtime}";
+    $dist_info .= " toolchain=$comp_toolchain" if $comp_toolchain;
+    $dist_info .= " device=$comp_device" if $comp_device;
+    $dist_info .= " flavour=$comp_flavour" if $comp_flavour;
+    print $tempfd "$dist_info\n";
+}
+
+# is_same(file1, file2)
+sub is_same {
+    my ($file1, $file2) = @_;
+    my $stat1 = stat($file1)
+        or KreaTV::error("dist_targets: Source file missing: $file1 (invoked with @ARGV)");
+    my $stat2 = stat($file2)
+        or return 0;
+    return $stat1->dev == $stat2->dev && $stat1->ino == $stat2->ino;
+}
+
+# matches_filter(path)
+sub matches_filter {
+    my ($path) = @_;
+    for (@include) {
+        return 0 if $path !~ /$_/;
+    }
+    for (@exclude) {
+        return 0 if $path =~ /$_/;
+    }
+    return 1;
+}
+
+# print_progress(action, source, dest)
+sub print_progress {
+    my ($action, $source, $dest) = @_;
+    if ($verbose) {
+        printf("  %-11s %s -> %s%s\n", $action, $source, $dest, $comp_info);
+    }
+    else {
+        printf("  %-11s %s%s\n", $action, $dest, $comp_info);
+    }
+}
+
+# safe_copy(source_file, dest_file)
+sub safe_copy {
+    my ($source, $dest) = @_;
+    my ($tempfd, $tempname) = tempfile("$dest.XXXXXX");
+    close($tempfd); # Don't copy to the FD because then file attributes are lost
+    system(("cp", "-p", $source, $tempname)) == 0
+        or die "copy $source -> $tempname: $!";
+    move($tempname, $dest)
+        or die "move $tempname -> $dest: $!";
+}
+
+# on_same_file_system(path1, path2)
+sub on_same_file_system {
+    my ($path1, $path2) = @_;
+    my $stat1 = stat($path1);
+    my $stat2 = stat($path2);
+    return $stat1->dev == $stat2->dev;
+}
+
+# do_install(source_file, dest_file)
+#
+# Installs source_file as dest_file.
+#
+# * If dest_file doesn't exist, source_file is simply hard-linked to dest_file
+#   to save disk space and improve performance.
+# * If dest_file already exists and is older than source_file, source_file is
+#   also hard-linked into place.
+# * If dest_file already exists and has the same mtime and size as source_file,
+#   then source_file is also hard-linked into place.
+# * Otherwise (i.e., dest_file already exists and is newer than source_file),
+#   source_file is copied to dest_file so that dest_file's mtime will be
+#   updated. (A hard link can't be used in this case, because Makefile rules
+#   that depend on dest_file will not detect the changed file unless mtime has
+#   increased, and hard-linking doesn't update mtime.)
+# * If source_file and dest_file are on different file systems, then
+#   source_file will be copied instead of hard-linked.
+sub do_install {
+    my ($source, $dest) = @_;
+
+    my $dest_stat = stat($dest);
+    if ($dest_stat) {
+        my $source_stat = stat($source);
+        if ($dest_stat->mtime > $source_stat->mtime
+            || ($dest_stat->mtime == $source_stat->mtime
+                && $dest_stat->size != $source_stat->size)) {
+            safe_copy($source, $dest);
+            print_progress("INSTALL", $source, "$dest (copy)");
+            return;
+        }
+    }
+    print_progress("INSTALL", $source, $dest);
+
+    if (on_same_file_system($source, dirname($dest))) {
+        # Loop to avoid a race when several dist_target are installing to the
+        # same place.
+        my $tries = 100;
+        while (!link($source, $dest) && $tries > 0) {
+            if ($! != Errno::EEXIST) {
+                die "do_install $source -> $dest: $!";
+            }
+            unlink($dest); # Ignore any error to avoid race.
+            --$tries;
+        }
+        if ($tries == 0) {
+            die "do_install $source -> $dest: gave up";
+        }
+    }
+    else {
+        safe_copy($source, $dest);
+    }
+}
+
+# install_tree(install_dir, file, target)
+sub install_tree {
+    my $install_dir = cleanpath(shift);
+    my $file = shift;
+    my $target = shift;
+
+    opendir(DIR, "$target");
+    my @files = readdir(DIR);
+    closedir DIR;
+    foreach my $f (@files) {
+        next if ($f eq "." || $f eq ".." || $f eq ".svn");
+        if (-d "$target/$f") {
+            next if ($non_recursive);
+            install_tree("$install_dir" . ($flatten ? "" : "/$f"),
+                         "$file/$f", "$target/$f");
+        }
+        elsif (matches_filter("$target/$f")) {
+            dist("$target/$f", "$install_dir/$f");
+            if (!is_same("$target/$f", "$install_dir/$f")) {
+                mkpath($install_dir);
+                do_install("$target/$f", "$install_dir/$f");
+            }
+        }
+    }
+}
+
+# install(install_dir, targets)
+sub install {
+    my $targets = shift;
+    my $install_dir = cleanpath(shift);
+
+    foreach my $target (@{$targets}) {
+        my $file = basename($target);
+        my $path = "";
+        if ($preserve_source_dir eq "true") {
+            $path = dirname($target);
+        }
+
+        if (-d $target) {
+            install_tree("$install_dir/$path/" . ($flatten ? "" : "/$file"),
+                         "$file", "$target");
+        }
+        elsif (matches_filter($target)) {
+            if (!is_same($target, "$install_dir/$path/$file")) {
+                if ($dereference && -l $target) {
+                    my $symvalue = readlink($target);
+                    if ($symvalue =~ /^\//) {
+                        $target = $symvalue;
+                    }
+                    else {
+                        $target = dirname($target) . "/$symvalue";
+                    }
+                }
+                mkpath("$install_dir/$path");
+                do_install($target, "$install_dir/$path/$file");
+            }
+            dist($target, "$install_dir/$path/$file");
+        }
+    }
+}
+
+sub installr {
+    my $src = shift;
+    my $dest = shift;
+
+    if (-d $dest) {
+        die "Error: Destination must be filename when using rename\n";
+    }
+    if (matches_filter($src)) {
+        dist($src, $dest);
+        if (!is_same($src, $dest)) {
+            mkpath(dirname($dest));
+            do_install($src, $dest);
+        }
+    }
+}
+
+sub installsl {
+    my $src = shift;
+    my $dest = shift;
+
+    if (matches_filter($src)) {
+        print_progress("INSTALL", $src, "$dest (symlink)");
+        mkpath(dirname($dest));
+        KreaTV::system("ln -sfn $src $dest");
+        dist($dest, $dest);
+    }
+}
+
+my $dest_dir;
+my @targets;
+my $rename = 0;
+my $symlink = 0;
+
+foreach (@ARGV) {
+    if (/--preserve-source-dir=(\S*)/) {
+        $preserve_source_dir = $1;
+    }
+    elsif (/--parents/) {
+        $preserve_source_dir = "true";
+    }
+    elsif (/--non-recursive/) {
+        $non_recursive = 1;
+    }
+    elsif (/--exclude=(\S*)/) {
+        push(@exclude, $1);
+    }
+    elsif (/--(?:include|match)=(\S*)/) {
+        push(@include, $1);
+    }
+    elsif (/--flatten/) {
+        $flatten = 1;
+    }
+    elsif (/--rename/) {
+        $rename = 1;
+    }
+    elsif (/--symlink/) {
+        $symlink = 1;
+    }
+    elsif (/--dereference/) {
+        $dereference = 1;
+    }
+    elsif (/--help/) {
+        help;
+        exit 0;
+    }
+    else {
+        push @targets, $_;
+    }
+}
+if (@targets < 2) {
+    help;
+    exit 1;
+}
+
+($tempfd, $tempname) = tempfile("$ENV{COMPONENT_ROOT}/.dist.XXXXXX");
+
+$dest_dir = pop @targets;
+
+if ($rename) {
+    installr($targets[0], $dest_dir);
+}
+elsif ($symlink) {
+    installsl($targets[0], $dest_dir);
+}
+else {
+    install(\@targets, $dest_dir);
+}

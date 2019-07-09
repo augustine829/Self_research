@@ -1,0 +1,9 @@
+quickdiff.nowarn.before.switch=always
+printMargin=true
+deletionIndicationInOverviewRuler=true
+eclipse.preferences.version=1
+changeIndicationInOverviewRuler=true
+overviewRuler_migration=migrated_3.1
+org.eclipse.cdt.ui.isOccurrenceGoToNextNavigationTarget=true
+lineNumberRuler=true
+additionIndicationInOverviewRuler=true

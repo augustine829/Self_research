@@ -1,0 +1,12 @@
+#!/bin/sh
+# Show log and diff for specific commit (similar to "Show commit by # in WebSVN")
+if [ $# -ne 1 ]
+then
+  echo "Show log and diff for specific commit"
+  echo "Usage: `basename $0` COMMIT_NUMBER"
+  exit 1
+fi
+
+SVN=http://svn.arrisi.com/dev/
+svn log -c $1 $SVN
+svn diff -c $1 $SVN

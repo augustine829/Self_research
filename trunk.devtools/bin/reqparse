@@ -1,0 +1,191 @@
+#!/usr/bin/python
+
+import os
+import re
+import sys
+from os.path import dirname, realpath, join, exists, relpath
+sys.path.insert(0, join(dirname(realpath(__file__)), '../lib/pycommon'))
+from collections import defaultdict
+from optparse import OptionParser
+from common import get_working_copy_root_path
+
+
+def get_reachable(graph, items, reachable=None):
+    if not reachable:
+        reachable = set()
+    for x in items:
+        if x not in reachable:
+            reachable.add(x)
+            get_reachable(graph, graph[x], reachable)
+    return reachable
+
+
+def get_leaf_components(all_components):
+    inner_components = set()
+    for x in all_components:
+        if "/" in x:
+            inner_components.add(dirname(x))
+    return all_components - inner_components
+
+
+def print_dependencies(requires, required_by, component, options):
+    if options.uses:
+        graph = required_by
+    else:
+        graph = requires
+    if options.graphviz:
+        printed = set()
+
+        def print_req(component):
+            printed.add(component)
+            for dep in graph[component]:
+                if graph is requires:
+                    print '"%s" -> "%s";' % (component, dep)
+                else:
+                    print '"%s" -> "%s";' % (dep, component)
+                if dep not in printed:
+                    print_req(dep)
+
+        print "digraph requires {"
+        print "node [color=lightblue2, style=filled];"
+        print_req(component)
+        print "}"
+    else:
+        if options.all:
+            components = get_reachable(graph, graph[component])
+        else:
+            components = set(graph[component])
+        if options.complement:
+            all_components = set(graph)
+            components = all_components - components
+        if options.only_leaves:
+            all_components = set(requires)
+            leaf_components = get_leaf_components(all_components)
+            components &= leaf_components
+        if components:
+            print "\n".join(sorted(components))
+
+
+def print_path(requires, component, dependency, path=None, visited=None):
+    if path is None:
+        path = []
+    if visited is None:
+        visited = set()
+    path.append(component)
+    visited.add(component)
+    if component == dependency:
+        print "\n".join(path)
+        sys.exit(0)
+    for x in requires[component]:
+        if x not in visited:
+            print_path(requires, x, dependency, path, visited)
+    path.pop()
+
+
+def verify_components(components):
+    for component in components:
+        if not exists(component):
+            print "Could not find component %s" % component
+            sys.exit(1)
+
+
+def main():
+    op = OptionParser(
+        description="Prints dependencies to/from a component or a dependency"
+                    " path between two components.",
+        usage="\n  %prog -b|-u [options] COMPONENT"
+              "\n  %prog -p COMPONENT DEPENDENCY")
+    op.add_option("-b", "--used-by", action="store_true",
+                  help="print components that COMPONENT explicitly requires")
+    op.add_option("-u", "--uses", action="store_true",
+                  help="print components that explicitly require COMPONENT")
+    op.add_option("-p", "--path", action="store_true",
+                  help="print one of the dependency paths between a"
+                       " component and a component (recursively) required by"
+                       " the first component")
+    op.add_option("-a", "--all", action="store_true",
+                  help="also print implicit (recursive) requirements")
+    op.add_option("--complement", action="store_true",
+                  help="print the complement of the matching components; i.e.,"
+                       " with -a/--all, print all components that are not"
+                       " reachable")
+    op.add_option("--only-leaves", action="store_true",
+                  help="only print leaf components")
+    op.add_option("--ignore-component", action="append",
+                  metavar="COMPONENT",
+                  help="Prune a component and all its incoming and outgoing"
+                       " requires; may be given multiple times")
+    op.add_option("--add-dependency", action="append",
+                  metavar="COMPONENT1:COMPONENT2",
+                  help="add a dependency from COMPONENT1 to COMPONENT2 as if"
+                       " it would exist in the tree")
+    op.add_option("-g", "--graphviz", action="store_true",
+                  help="print graph that can be read by the Graphviz dot"
+                       " program")
+    (options, args) = op.parse_args(sys.argv[1:])
+
+    startdir = os.getcwd()
+
+    rootdir = get_working_copy_root_path(startdir)
+    os.chdir(rootdir)
+
+    if options.path:
+        if len(args) != 2:
+            op.print_help()
+            op.error("Please specify two components")
+        component1 = relpath(join(startdir, args[0]), rootdir)
+        component2 = relpath(join(startdir, args[1]), rootdir)
+    else:
+        if len(args) != 1:
+            op.print_help()
+            op.error("Please specify a component")
+        component = relpath(join(startdir, args[0]), rootdir)
+
+    verify_components(
+        [component1, component2] if options.path else [component])
+
+    if [options.uses, options.used_by, options.path].count(True) != 1:
+        op.print_help()
+        op.error("Please specify -u/--uses, -b/--used-by or -p/--path")
+
+    if not exists(".requires"):
+        if not exists("Makefile"):
+            op.error("Cannot find Makefile, you need to be in a code tree")
+        if os.system("make .requires >/dev/null") != 0:
+            op.error("Could not build .requires")
+
+    if options.ignore_component:
+        ignored_components = set(options.ignore_component)
+    else:
+        ignored_components = set()
+
+    requires = defaultdict(list)     # x -> list of components required by x
+    required_by = defaultdict(list)  # x -> list of components that require x
+    for line in open(".requires"):
+        m = re.match(r"(?P<comp>\S+): (?P<deps>.*)", line)
+        if m:
+            comp = m.group("comp")
+            if comp == "all" or comp in ignored_components:
+                continue
+            for dep in m.group("deps").split():
+                if dep not in ignored_components:
+                    requires[comp].append(dep)
+                    required_by[dep].append(comp)
+                    # Components that have no dependencies have no entries in
+                    # .requires, so make sure that all components have entries
+                    # in the data structures:
+                    requires[dep]
+                    required_by[comp]
+
+    if options.add_dependency:
+        for extra_dependency in options.add_dependency:
+            (comp, dep) = extra_dependency.split(":")
+            requires[comp].append(dep)
+            required_by[dep].append(comp)
+
+    if options.path:
+        print_path(requires, component1, component2)
+    else:
+        print_dependencies(requires, required_by, component, options)
+
+main()

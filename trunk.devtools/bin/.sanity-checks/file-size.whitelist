@@ -1,0 +1,14 @@
+^toix/
+^toixcore/
+^portals/
+^bsg/branches/DEV_ttnet_release/
+^bsg/branches/BOBROV
+^bsg/branches/BRASSICA
+^bsg/branches/DEV_nsn_reno
+^bsg/branches/VIP2000_R23.10.00
+^devtools/
+^testsystem/
+^utils/jtag_st710x
+^softwaretesting/reqtrace
+^firmware/FAT
+^hardware/exjobb/dvbtool

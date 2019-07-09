@@ -1,0 +1,109 @@
+#!/bin/sh
+
+set -u
+
+REPOS="$1"
+TXN="$2"
+ORIGIN="$3"
+
+# Max allowed file size regardless of binaryness
+MAX_SIZE_BYTES=1000000
+MAX_SIZE_TEXT="1 MB"
+
+# Max allowed binary file size
+if [ $ORIGIN = KA ]; then
+  MAX_BINARY_SIZE_BYTES=100000
+  MAX_BINARY_SIZE_TEXT="100 kB"
+else
+  MAX_BINARY_SIZE_BYTES=1000
+  MAX_BINARY_SIZE_TEXT="1 kB"
+fi
+
+# The percent of "binaryness" for classifying a file as being binary.
+BINARYNESS_THRESHOLD=50
+
+binaryness=$(dirname $0)/binaryness
+whitelist=$(dirname $0)/file-size.whitelist
+start_time=$(date +%s.%N)
+block_msg=$(dirname $0)/block.msg
+
+svnlook_debug()
+{
+  case $1 in
+    changed) svn status -q --ignore-externals "$4" ;;
+    cat) cat "$5" ;;
+  esac
+}
+
+if [ "${USE_DEBUG_SVNLOOK:-false}" = "true" ]; then
+    alias svnlook=svnlook_debug
+fi
+
+debug=false
+if [ "${CHECK_DEBUG:-false}" = "true" ]; then
+  debug=true
+fi
+
+# Safety measure: exit if the binaryness program isn't available
+if [ ! -x $binaryness ]; then
+  echo "$0: Error: $binaryness not executable"
+  exit 0
+fi
+
+errors=$(
+svnlook changed -t "$TXN" "$REPOS" |
+  sed -rne 's/^(A|U|M). *//p' |
+  grep -vEf $whitelist |
+  while read filename; do
+    set -- $(svnlook cat -t "$TXN" "$REPOS" "$filename" 2>/dev/null | $binaryness -v -)
+    if [ "$#" -eq 6 ]; then
+      size=$1
+      percentage=$5
+      if [ "$percentage" -ge $BINARYNESS_THRESHOLD ]; then
+        if [ "$size" -gt $MAX_BINARY_SIZE_BYTES ]; then
+          echo >&2 "$filename: error: binary file is too big ($size bytes);" \
+                   "limit for binaries is $MAX_BINARY_SIZE_TEXT"
+          echo large-binary
+        fi
+      else
+        if [ "$size" -gt $MAX_SIZE_BYTES ]; then
+          echo >&2 "$filename: error: file is too big ($size bytes);" \
+                   "limit is $MAX_SIZE_TEXT"
+          echo large-text
+        fi
+      fi
+    else
+      : Output from binaryness not as expected.
+    fi
+    if $debug; then
+      echo >&2 "  binaryness: $*"
+    fi
+  done
+)
+
+if [ -z "$errors" ]; then
+  issues=" none"
+  exitcode=0
+else
+  issues=""
+  large_binaries=$(echo $errors | grep -c large-binary)
+  if [ $? -eq 0 ]; then
+    issues="$issues large-binary:$large_binaries"
+  fi
+  large_texts=$(echo $errors | grep -c large-text)
+  if [ $? -eq 0 ]; then
+    issues="$issues large-text:$large_texts"
+  fi
+  exitcode=1
+fi
+
+end_time=$(date +%s.%N)
+elapsed_time=$(echo $end_time - $start_time | bc)
+
+printf "File size check completed in %f seconds (issues:$issues).\n" $elapsed_time
+
+if [ $exitcode -ne 0 ]; then
+  cat $block_msg >&2
+fi
+
+exit $exitcode

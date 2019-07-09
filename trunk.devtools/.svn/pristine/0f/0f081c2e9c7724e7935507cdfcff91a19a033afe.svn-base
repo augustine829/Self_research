@@ -1,0 +1,5 @@
+requests>=2.3.0
+tlslite>=0.4.4
+six>=1.5.2
+filemagic>=1.6
+setuptools>=0.8.0

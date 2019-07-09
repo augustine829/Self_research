@@ -1,0 +1,103 @@
+#! /bin/sh
+
+set -eu
+
+error() {
+    echo "$(basename $0): error: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Usage:
+
+    1. svninterdiff <FILE>
+    2. svninterdiff <-c N | -r M[:N]> <FILE[@REV]>
+    3. svninterdiff <-c N | -r M[:N]> <URL[@REV]>
+    4. svninterdiff <URL[@OLDREV]> <URL[@NEWREV]>
+
+svninterdiff displays changes of a patch file in a Subversion
+workspace/repository. It works in mostly the same way as "svn diff" does, but
+shows the changes of the patch as a diff instead of "a diff of diffs" by using
+interdiff(1). If you don't have interdiff(1), install the patchutils package.
+
+1: Show local changes of the patch FILE.
+2: Show changes between two revisions of the patch FILE.
+3: Show changes between two revisions of a patch specified by a URL.
+4: Show changes between two revisions of a patch specified by two URLs.
+EOF
+}
+
+revisions=
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+
+        -c)
+            shift
+            revisions=$(($1 - 1)):$1
+            ;;
+
+        -r)
+            shift
+            revisions=$1
+            ;;
+
+        -*)
+            error "unknown option: $1; try the \"-h\" flag"
+            ;;
+
+        *)
+            break
+            ;;
+    esac
+
+    shift
+done
+
+if [ -n "$revisions" ]; then
+    # Forms 2 and 3.
+    if [ "$#" -ne 1 ]; then
+        error "exactly one argument must be given when using -c/-r; try the \"-h\" flag"
+    fi
+    path=$1
+    if echo $revisions | grep -q ":"; then
+        rev1=${revisions%:*}
+        rev2=${revisions#*:}
+    else
+        rev1=$revisions
+        rev2=HEAD
+    fi
+    tmpfile1=$(mktemp)
+    tmpfile2=$(mktemp)
+    trap "rm -f $tmpfile1 $tmpfile2" EXIT
+    file1=$tmpfile1
+    file2=$tmpfile2
+    svn cat -r $rev1 $path >$tmpfile1
+    svn cat -r $rev2 $path >$tmpfile2
+else
+    if [ "$#" -eq 1 ]; then
+        # Form 1.
+        path=$1
+        file1="$(dirname $path)/.svn/text-base/$(basename $path).svn-base"
+        file2=$path
+    elif [ "$#" -eq 2 ]; then
+        # Form 4.
+        url1=$1
+        url2=$2
+        tmpfile1=$(mktemp)
+        tmpfile2=$(mktemp)
+        trap "rm -f $tmpfile1 $tmpfile2" EXIT
+        file1=$tmpfile1
+        file2=$tmpfile2
+        svn cat $url1 >$tmpfile1
+        svn cat $url2 >$tmpfile2
+    else
+        error "bad number of arguments; try the \"-h\" flag"
+    fi
+fi
+
+interdiff $file1 $file2

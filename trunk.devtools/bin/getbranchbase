@@ -1,0 +1,73 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+   cat <<EOF
+Usage:
+    getbranchbase <branch>
+
+    branch - URL to branch. Is not needed if you are in the root of the working
+             copy of a branch
+
+    This tool finds the base of your branch. The base consists of the PATH
+    and REVISION from which the branch was created from or last rebased to.
+EOF
+}
+
+if [ $# -gt 0 ] && [ "$1" = "-h" -o "$1" = "--help" ];then
+   usage
+   exit 0
+fi
+
+if [ $# -eq 0 ]; then
+    branch=$(svn info | sed -rn 's!^URL: !!p')
+else
+    branch=$1
+fi
+
+# Exits if branch does not exist
+svn ls $branch >/dev/null
+
+year=$(date +%Y)
+month=$(date +%m)
+day=$(date +%d)
+
+if [ "$month" -eq "2" -a "$day" -eq "29" ]; then
+    day=28
+fi
+
+while [ $year -gt 2003 ]; do
+    year=$((year-1))
+    date="$year-$month-$day"
+
+    branch_added=$(svn log -l 1 -v --stop-on-copy -r {$date}:HEAD $branch |grep "A /")
+
+    if [ "$branch_added" = "" ]; then
+        # Branch older than 2003...
+        break
+    fi
+
+    point_of_creation=$(echo $branch_added | grep "(from \/" | sed -e 's!\(.*\)(from /\(.*\))!\2!')
+
+    if [ "$point_of_creation" != "" ]; then
+        base_branch=$(echo $point_of_creation | sed -e 's!\(.*\):\(.*\)!\1!')
+        rev_of_creation=$(echo $point_of_creation | sed -e 's!\(.*\):\(.*\)!\2!')
+
+        # Will be empty if not rebased:
+        base_rev=$(svn pg svn:mergeinfo $branch | grep "$base_branch:" | sed -e 's!\(.*\)-\(.*\)!\2!')
+
+        if [ -z "$base_rev" ]; then
+            base_rev=$rev_of_creation
+        fi
+
+        echo "$base_branch:$base_rev"
+        exit 0
+    else
+        echo "Branch seems to have no parent. Either it is created from scratch or it is not a branch."
+        exit 0
+    fi
+done
+
+echo "Error: Seems like branch was created before $date. I do not support this scenario. Sorry..."
+exit 1

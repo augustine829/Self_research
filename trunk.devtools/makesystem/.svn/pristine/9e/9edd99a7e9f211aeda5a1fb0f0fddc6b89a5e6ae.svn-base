@@ -1,0 +1,10 @@
+//@ The correct count of effective lines is : 0
+//@ Disabled
+
+  // ===== CASE 3 ========
+
+  /*
+  foo(); // ineffective line
+  fie("*/"); // ineffective line
+  fum(); // ineffective line
+  */

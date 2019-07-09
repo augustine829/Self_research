@@ -1,0 +1,77 @@
+#!/bin/bash
+Usage()
+{
+  echo "
+  This is script is intended as a helper script for backtrace parsing.
+
+  This script generates objdump of *.so or bin executables. The output is saved to
+  *.text file to be used by backtrace parsing perl script.
+
+  Usage: $0 Path [OutPath] [FileList]
+
+  Where,
+    Path: location to search for *.so/executables 
+
+    OutPath: (optional) location to copy output of objdump files.
+   
+    otherwise *.text files will be in the same location as the *.so
+    or executable.
+       
+    FilterList:  (optional) a text file listing specific *.so/executables for which
+    object dump is required. one file per line, such as:
+  
+    cablecardservice
+    libgcc_s.so.1
+    libIpc.so
+
+    if a filter list is not provided then the given path is recursively searched.
+  
+  NOTE: user is expected to define env OBJDUMP to point the the objdump utility that
+  should be used.
+
+  Example: $0 /extra/vms610/trunk/dist/bcm45 /extra/trunkobjdump
+  Example: $0 /extra/ip800/trunk/dist/bcm45 /extra/dumps  /extra/crashlog/files.txt
+  Example: $0 . ./dumpout filterlist.txt 
+  "
+}
+
+_dumpall()
+{
+ for f in $(find $Dir -type f \( -executable -o -name '*.so*' \) -not -name '*.debug' -exec sh -c $'[ "$(head -c 4 {})" == "\x7fELF" ] && echo {};' \;); do $OBJDUMP -S $f | c++filt > $f.text; done
+}
+
+_copytextfile()
+{
+ mkdir -p $OutDir
+ for f in `find $Dir -type f -name '*.text'`; do cp $f $OutDir; done
+}
+
+_dumpfromlist()
+{
+   for i in $(cat $Filelist) ; do
+       echo $i;
+       for f in `find $Dir -type f -name $i`; do $OBJDUMP -S $f | c++filt > $f.text; done
+   done
+}
+
+: ${OBJDUMP?"Need to set OBJDUMP to point to objdump of toolchain, such as /usr/local/motorola/toolchain/bcm45/1.0.2/bin/mipsel-motorola-linux-uclibc-objdump"}
+
+if [ "$#" = "1" ]; then
+   Dir=$1
+   _dumpall
+elif [ "$#" = "2" ]; then
+   Dir=$1
+   OutDir=$2
+   _dumpall
+   _copytextfile
+else
+  if [ "$#" = "3" ]; then
+   Dir=$1
+   OutDir=$2
+   Filelist=$3
+   _dumpfromlist
+   _copytextfile
+  else
+   Usage
+  fi
+fi

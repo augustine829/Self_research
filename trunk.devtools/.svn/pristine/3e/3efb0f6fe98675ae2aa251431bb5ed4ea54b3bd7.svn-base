@@ -1,0 +1,70 @@
+#!/usr/bin/env python2
+
+# Copyright (c) 2016 ARRIS Enterprises, LLC. All rights reserved.
+#
+# This program is confidential and proprietary to ARRIS Enterprises, LLC.
+# (ARRIS), and may not be copied, reproduced, modified, disclosed to others,
+# published or used, in whole or in part, without the express prior written
+# permission of ARRIS.
+
+import optparse
+import sys
+from os.path import dirname, realpath
+
+sys.path.insert(0, dirname(realpath(__file__)) + '/../lib/pycommon')
+
+import common
+import devhub
+import gitcommon
+
+
+cmdline_branch = None
+
+
+def _fail(short_message):
+    sys.stderr.write('Error: %s\n' % short_message.strip())
+    sys.exit(1)
+
+
+def _parse_args():
+    global cmdline_branch
+    parser = optparse.OptionParser(
+        usage='git parent [OPTIONS] [BRANCH]',
+        description=(
+            '%prog prints the parent branch of BRANCH or the currently '
+            'checked out branch in a Git work tree. The information is '
+            'retrieved from devhub which means the branch must exist in '
+            'the remote repository on devhub.'))
+    _, positional_args = parser.parse_args()
+    if len(positional_args) > 1:
+        _fail('Expected at most one positional argument (BRANCH).')
+    cmdline_branch = positional_args[0] if positional_args else None
+
+
+def main():
+    _parse_args()
+
+    if not gitcommon.is_inside_work_tree():
+        _fail("This command must be run inside a Git work tree.")
+
+    try:
+        repo = gitcommon.get_repo_name()
+        if cmdline_branch:
+            branch = gitcommon.branch_tuple(cmdline_branch)
+        else:
+            branch = gitcommon.branch_tuple(gitcommon.get_repo_branch_name())
+    except common.ExecutionError as e:
+        _fail(str(e))
+
+    try:
+        parent = devhub.get_branch_parent(repo, branch.simplified_branch)
+    except common.ExecutionError as e:
+        _fail(str(e))
+
+    if not parent:
+        _fail('The branch does not have a registered parent on devhub.')
+
+    print parent
+
+
+main()

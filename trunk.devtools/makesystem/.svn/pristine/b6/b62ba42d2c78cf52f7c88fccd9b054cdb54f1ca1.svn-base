@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Very simple config.sub, replace the 3pp config.sub with this instead of
+# patching if there are problems with unrecognised machines.
+
+case $1 in
+  *arm*)
+    echo arm-kreatv-linux-gnu
+    ;;
+  *i686* | *x86_64*)
+    echo i686-pc-linux-gnu
+    ;;
+  *mipsel*)
+    echo mipsel-kreatv-linux-gnu
+    ;;
+  *sh4*)
+    echo sh4-kreatv-linux-gnu
+    ;;
+esac

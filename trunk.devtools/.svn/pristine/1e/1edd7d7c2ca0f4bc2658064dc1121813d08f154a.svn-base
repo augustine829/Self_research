@@ -1,0 +1,8 @@
+#!/bin/sh
+
+set -eu
+
+. $(dirname $0)/common.sh
+
+find $remote_workdir/* -maxdepth 0 -mtime +$((days_to_keep - 1)) |
+    xargs -r rm -rf

@@ -1,0 +1,306 @@
+#!/usr/bin/python
+
+USAGE = """\
+%prog [options] stb.log ipc.svg
+
+This is a tool that generates an SVG file containing a sequence diagram of IPC
+calls made on an STB.
+
+Dependencies: The mscgen tool (http://www.mcternan.me.uk/mscgen/) is needed in
+PATH.
+
+To use it, run this on the STB (running trunk@208690 or later):
+
+  echo ipc.debug=true >>/etc/kreatv.conf
+  reboot
+
+Then run this on host:
+
+  logclient -l all -f stb.log ...
+  $EDITOR stb.log                          # prune log if wanted
+  stblog2ipcsvg stb.log ipc.svg
+  $SVGREADER ipc.svg                       # for instance Google Chrome"""
+
+from collections import namedtuple
+from datetime import datetime
+from optparse import OptionParser
+import os
+import re
+import subprocess
+import sys
+
+# timestamp: time of the call (a datetime)
+# client: client PID
+# server: server PID
+# type: "request", "response" or "oneway"
+# interface: interface name
+# method: method name
+# duration: call time (a timedelta) if type == "response", otherwise None
+CallEntry = namedtuple(
+    "CallEntry", "timestamp client server type interface method duration")
+
+# timestamp: time of the event (a datetime)
+# desc: Event description
+EventEntry = namedtuple("EventEntry", "timestamp descr")
+
+# events: list of CallEntry/EventEntry
+# pid_map: PID -> process name
+# processes: list of names of processes to include in the graph
+IpcInfo = namedtuple("IpcInfo", "events pid_map processes")
+
+PROCESS_TRANSLATION_MAP = {
+    "run_drm.sh": "drmservice",
+    "run_ib.sh": "infobroker",
+    "run_ic.sh": "infoclient",
+    "securemediaservice.sh": "securemediaservice",
+    "smdaemon.sh": "smdaemon",
+    "start_dlna.sh": "dlnamediacontroller",
+    "verimatrixd.sh": "verimatrix",
+    "webkit_portal.sh": "ekioh-webkit",
+}
+
+DEFAULT_PROCESS_ORDER = [
+    "rte-ipcproxy",
+    "iapbootstrap",
+    "dlnamediacontroller",
+    "inputservice",
+    "frontpanel",
+    "netconfig",
+    "infoclient",
+    "storageman",
+    "timeman",
+    "scheduler",
+    "rte",
+    "procman",
+    "appman",
+    "sysman",
+    "audiooutput",
+    "videooutput",
+    "infobroker",
+    "assetmanager",
+    "assetmanagerproxy",
+    "verimatrix",    # keep these
+    "ekioh-webkit",  # near halserver
+    "mediamanager",  # to get a nice
+    "streamer",      # layout for zaps
+    "halserver",
+]
+
+logline_re = re.compile(
+    r"(?P<seqnr>\d+) (?P<timestamp>[^.]+)\.(?P<ms>\d+)"
+    r" (?P<process>[^(]+)\((?P<pid>\d+)\) (?P<level>[^:]+):"
+    r" (?P<message>.*)")
+ipccall_re = re.compile(
+    r"TCIpcClient\[[^]]+\]: (?P<direction>Calling|Called)"
+    r" (?P<interface>[^:]+)::(?P<method>[^(]+)\(\)"
+    r" (?P<oneway>\[oneway\])?.*\[pid=(?P<serverpid>\d+)\]")
+
+
+def sanitize_log(log_lines):
+    result = []
+    for line in log_lines:
+        if logline_re.match(line):
+            result.append(line)
+        else:
+            sys.stderr.write("Warning: Ignoring bad log line %r\n" % line)
+    return result
+
+
+def parse_log(log_lines):
+    pid_map = {}  # PID -> process name
+    events = []
+    ipc_pids = set()  # PIDs of clients and servers
+    request_timestamps = {}  # (PID, interface, method) -> timestamp
+    for line in log_lines:
+        m = logline_re.match(line)
+        if not m:
+            raise Exception("Failed to parse log line: %r" % line)
+        (pid, process, message) = m.group("pid", "process", "message")
+        name = PROCESS_TRANSLATION_MAP.get(process, process)
+        if name == "streamer":
+            name = "streamer (%s)" % pid
+        pid_map[pid] = name
+        try:
+            # wxlogclient format
+            timestamp = datetime.strptime(m.group("timestamp"),
+                                          "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            # logclient format
+            timestamp = datetime.strptime(m.group("timestamp"), "%H:%M:%S")
+        timestamp = timestamp.replace(microsecond=1000 * int(m.group("ms")))
+        if message.startswith("{event} "):
+            events.append(EventEntry(timestamp, message[8:]))
+            continue
+        m = ipccall_re.match(message)
+        if not m:
+            continue
+        timestamp_key = (pid, m.group("interface"), m.group("method"))
+        duration = None
+        if m.group("oneway"):
+            call_type = "oneway"
+        elif m.group("direction") == "Calling":
+            call_type = "request"
+            request_timestamps[timestamp_key] = timestamp
+        else:
+            call_type = "response"
+            request_timestamp = request_timestamps.get(timestamp_key)
+            if request_timestamp is not None:
+                duration = timestamp - request_timestamp
+        events.append(
+            CallEntry(timestamp, pid, m.group("serverpid"), call_type,
+                      m.group("interface"), m.group("method"), duration))
+        ipc_pids.add(pid)
+        ipc_pids.add(m.group("serverpid"))
+    # Remove processes that don't participate in IPC calls:
+    for x in pid_map.keys():
+        if x not in ipc_pids:
+            del pid_map[x]
+    # Fix log messages being logged out-of-order
+    events.sort(key=lambda e: e.timestamp)
+    return IpcInfo(events, pid_map, pid_map.values())
+
+
+def apply_filters(ipc_info, include_string, exclude_string):
+    events = ipc_info.events
+    pid_map = ipc_info.pid_map
+    processes = ipc_info.processes
+    if include_string:
+        include = re.split(r"[\s,]+", include_string)
+        events = [x for x in events
+                  if (not type(x) is CallEntry
+                      or (pid_map[x.client] in include
+                          and pid_map[x.server] in include))]
+        pid_map = dict((k, v) for (k, v) in pid_map.iteritems()
+                       if v in include)
+        processes = include
+    else:
+        ordered_names = []
+        names = set(processes)
+        for x in DEFAULT_PROCESS_ORDER:
+            for n in names:
+                if n.split(' (')[0] == x:
+                    ordered_names.append(n)
+        names.difference_update(set(ordered_names))
+        # Add names not in DEFAULT_PROCESS_ORDER first:
+        processes = list(sorted(names)) + ordered_names
+    if exclude_string:
+        exclude = re.split(r"[\s,]+", exclude_string)
+        events = [x for x in events
+                  if (not type(x) is CallEntry
+                      or (pid_map[x.client] not in exclude
+                          and pid_map[x.server] not in exclude))]
+        pid_map = dict(
+            (k, v) for (k, v) in pid_map.iteritems()
+            if v not in exclude)
+        processes = list(x for x in processes if x not in exclude)
+    return IpcInfo(events, pid_map, processes)
+
+
+def generate_mscgen_input(ipc_info, fp):
+    # See <http://www.mcternan.me.uk/mscgen/> for mscgen syntax.
+
+    w = fp.write
+    w("msc {\n")
+    w('  hscale = "2";\n\n')
+    w('  "timestamp_l" [label="timestamp"],\n  ')
+    w(",\n  ".join('"%s" [label="%s"]' % (x, x) for x in ipc_info.processes))
+    w(',\n  "_spacer_" [label=""]')
+    w(',\n  "timestamp_r" [label="timestamp"]')
+    w(";\n\n")
+    close_event = None
+    requests_since_close = 0
+    responses_since_close = 0
+    oneway_since_close = 0
+    for (i, event) in enumerate(ipc_info.events):
+        if i % 30 == 29:
+            w("\n  ")
+            w(",\n  ".join(
+                '"%s" box "%s" [label="%s", textbgcolor="#d3d9e0"]'
+                % (x, x, x) for x in ipc_info.processes))
+            w(";\n\n")
+        if type(event) is EventEntry:
+            suffix = ""
+            if "TUNE: Player Close Issued" in event.descr:
+                close_event = event
+                requests_since_close = 1  # Include the close request
+                responses_since_close = 0
+                oneway_since_close = 0
+                suffix = " (1 request)"
+            elif close_event is not None and "TUNE: " in event.descr:
+                diff = event.timestamp - close_event.timestamp
+                suffix = " (since close: %d ms, %d requests, %d responses," \
+                         " %d oneway)" % (
+                             int(diff.total_seconds() * 1000),
+                             requests_since_close, responses_since_close,
+                             oneway_since_close)
+            w('\n  "timestamp_l" note "timestamp_r" [label="%s%s",'
+              ' textbgcolor="#e1d7b0"];\n\n' % (event.descr, suffix))
+            continue
+        if event.client not in ipc_info.pid_map \
+                or event.server not in ipc_info.pid_map:
+            sys.stderr.write(
+                "Warning: Ignoring %s::%s call from PID %s to PID %s since at"
+                " least one PID is unknown\n"
+                % (event.interface, event.method, event.client, event.server))
+            continue
+        if event.type == "oneway":
+            oneway_since_close += 1
+            arrow = "->"
+        elif event.type == "request":
+            requests_since_close += 1
+            arrow = "=>"
+        else:
+            responses_since_close += 1
+            arrow = "<<"
+        client_name = ipc_info.pid_map[event.client]
+        server_name = ipc_info.pid_map[event.server]
+        if event.duration is None:
+            extra = ""
+        else:
+            extra = " (%s ms)" % (event.duration.microseconds / 1000)
+        w('  "timestamp_l" box "timestamp_l" [label="%s.%03d",'
+          ' textbgcolor="#bad5ba"],\n'
+          % (event.timestamp.strftime("%X"),
+             event.timestamp.microsecond / 1000))
+        w('  "%s" %s "%s" [label="%s::%s%s"],\n'
+          % (client_name, arrow, server_name, event.interface, event.method,
+             extra))
+        w('  "timestamp_r" box "timestamp_r" [label="%s.%03d",'
+          ' textbgcolor="#bad5ba"];\n'
+          % (event.timestamp.strftime("%X"),
+             event.timestamp.microsecond / 1000))
+    w("}\n")
+
+
+def main():
+    op = OptionParser(usage=USAGE)
+    op.add_option(
+        "-i", "--include", metavar="PROCESSLIST",
+        help="include only the specified processes (comma-separated list);"
+        " this also specifies process order")
+    op.add_option(
+        "-e", "--exclude", metavar="PROCESSLIST",
+        help="exclude the specified processes (comma-separated list)")
+    op.set_defaults(include="", exclude="")
+    (options, args) = op.parse_args()
+    if len(args) != 2:
+        op.print_help()
+        op.exit(2, "%s: error: Bad number of arguments\n" % op.get_prog_name())
+
+    log_path = args[0]
+    svg_path = args[1]
+    tmp_path = svg_path + ".mscgen"
+    log_lines = open(log_path).readlines()
+    log_lines = sanitize_log(log_lines)
+    ipc_info = parse_log(log_lines)
+    if not ipc_info.events:
+        sys.stderr.write("Error: No IPC calls found in the log file\n")
+        sys.exit(1)
+    ipc_info = apply_filters(ipc_info, options.include, options.exclude)
+    with open(tmp_path, "w") as tmp_fp:
+        generate_mscgen_input(ipc_info, tmp_fp)
+    subprocess.check_call(["mscgen", "-T", "svg", "-o", svg_path, tmp_path])
+    os.remove(tmp_path)
+
+
+main()

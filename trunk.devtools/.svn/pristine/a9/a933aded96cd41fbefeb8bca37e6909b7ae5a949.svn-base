@@ -1,0 +1,106 @@
+#!/bin/sh
+
+usage() {
+    cat <<EOF
+Usage:
+ $(basename $0) [-q] [-i] [-b] [-t] [-n] [-c] [-p path] code
+ -b: look also in build dirs
+ -c: force color output
+ -h: print this usage text
+ -i: case insensitive
+ -n: print matching line number
+ -p: path to directory where to start search
+ -q: only print file names
+ -t: don't look in '3pp/...'
+EOF
+    exit 0
+}
+
+if [ -z "$1" ]; then
+    usage
+fi
+
+path=.
+color="--color=auto"
+grep_cmd="/bin/grep"
+cpus=$(grep -c ^processor /proc/cpuinfo)
+
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-q" ] ; then
+        quiet="-l"
+    fi
+    if [ "$1" = "-i" ] ; then
+        ignore_case="-i"
+    fi
+    if [ "$1" = "-b" ] ; then
+        # This will destroy the pruning of *-linux-gnu and therefore those
+        # directories will be checked:
+        check_build_dirs="true"
+    fi
+    if [ "$1" = "-t" ] ; then
+        skip_3pp="-name 3pp -prune -or"
+    fi
+    if [ "$1" = "-h" -o "$1" = "--help" ] ; then
+        usage
+    fi
+    if [ "$1" = "-p" ] ; then
+        shift
+        path="$1"
+    fi
+    if [ "$1" = "-n" ]; then
+        numbering="-n"
+    fi
+    if [ "$1" = "-c" ]; then
+        color="--color=always"
+    fi
+    code=$1
+    shift
+done
+
+find $path \( \
+  $skip_3pp \
+  -name "*-linux-gnu$check_build_dirs" -prune -or \
+  -name ".git" -prune -or \
+  -name ".svn" -prune -or \
+  -name "bcm15$check_build_dirs" -prune -or \
+  -name "bcm45$check_build_dirs" -prune -or \
+  -name "bcm74xx$check_build_dirs" -prune -or \
+  -name "dist" -prune -or \
+  -name "host$check_build_dirs" -prune -or \
+  -name "st40$check_build_dirs" -prune -or \
+  -name "st9$check_build_dirs" -prune -or \
+  -name "hi3716$check_build_dirs" -prune -or \
+  -name "vip*00$check_build_dirs" -prune \
+\) -type d -or \( \
+  -iname "*.c" -or \
+  -iname "*.cpp" -or \
+  -iname "*.h" -or \
+  -iname "*.hpp" -or \
+  -name "*.htm*" -or \
+  -name "*.idl" -or \
+  -name "*.in" -or \
+  -name "*.java" -or \
+  -name "*.js" -or \
+  -name "*.mk" -or \
+  -name "*.mmd" -or \
+  -name "*.patch" -or \
+  -name "*.perl" -or \
+  -name "*.php" -or \
+  -name "*.pl" -or \
+  -name "*.pm" -or \
+  -name "*.py" -or \
+  -name "*.sh" -or \
+  -name "*.tpl" -or \
+  -name "*.txt" -or \
+  -name "*.xml" -or \
+  -name "Imakefile" -or \
+  -name "Makefile*" -or \
+  -name "PATCHES" -or \
+  -name "configure" -or \
+  -name "config*" -or \
+  -name "kit_config*" -or \
+  -name "dist-*" -or \
+  -name "dist_*" -or \
+  -name "series" \
+\) -type f -print0 \
+| xargs -P $cpus -n 1024 -0 $grep_cmd -H $color $numbering $quiet $ignore_case -- "$code"

@@ -1,0 +1,701 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings FATAL => 'all';
+
+use Cwd;
+use File::Spec;
+use File::Temp;
+use Getopt::Long;
+use List::Util qw(first);
+
+
+my $start_cwd = getcwd();
+
+
+sub error {
+    my $message = shift;
+    my $func = shift;
+
+    print STDERR "Error: $message\n";
+    if (defined($func)) {
+        $func->();
+    }
+    exit_now(1);
+}
+
+sub exit_now
+{
+    my ($exit_code) = @_;
+    # Change back to start directory so cleanup can remove the temp directory.
+    chdir $start_cwd;
+    exit $exit_code;
+}
+
+sub require_module {
+    my ($module_name, $package_name) = @_;
+    unless (eval "require $module_name; $module_name->import(); 1;") {
+        error(
+            "Please install the Perl module $module_name (package name"
+            . " \"$package_name\" in RPM-based distributions)");
+    }
+}
+
+BEGIN { require_module("URI::Escape", "perl-URI"); }
+BEGIN { require_module("XML::DOM", "perl-XML-DOM"); }
+
+use URI::Escape;
+use XML::DOM;
+
+
+my %settings;
+
+my $comparison_tmp_dir;
+
+local $@;
+eval {
+    parse_arguments();
+
+    if (exists($settings{'list-iips'})) {
+        list_iips();
+    }
+    else {
+        $comparison_tmp_dir = File::Temp::tempdir(
+            "cmp.XXXXXX", DIR => File::Spec->tmpdir(), CLEANUP => 1);
+        chdir $comparison_tmp_dir;
+
+        compare();
+    }
+};
+if ($@) {
+    error("$@");
+}
+
+exit_now(0);
+
+
+sub usage
+{
+    print <<END;
+Usage:
+    [1] $0 [OPTIONS] LEFT-LOG RIGHT-LOG
+    [2] $0 --list-iips LOG
+
+Description:
+    [1]
+    Compares contents of built kits, e.g. the same kit but from different
+    releases (tags or branches).
+
+     * Lists of IIPs installed in each kit are compared. That includes IIPs
+       added via included configs and all IIP dependencies.
+
+     * Optional: Description files are compared for each IIP if the
+       --description-diff option is given. This is to detect changes in
+       description texts, parameters, default values etc.
+
+       It is REQUIRED to let the automatic build servers build the branches
+       containing the kits to be compared. This is so that description
+       information can be retrieved from built IIPs. If the provided logs are
+       not URLs pointing to logs on automatic build servers then the user will
+       be asked to provide a build page URL for each log.
+
+    [2]
+    Displays a list of IIPs installed in a single kit.
+
+    LEFT-LOG, RIGHT-LOG, LOG arguments:
+       A file or a URL pointing to a kit build log.
+
+Options:
+  [--description-diff <file>]
+                    Description files for left and right IIPs are compared.
+                    The result is written to a diff file, which can be opened
+                    by another program, e.g. "kompare".
+  [--help]          Display this help and exit.
+
+END
+}
+
+sub parse_arguments
+{
+    GetOptions(\%settings, 'description-diff=s', 'list-iips', 'help');
+
+    if (exists $settings{'help'}) {
+        usage();
+        exit_now(0);
+    }
+
+    if (scalar(@ARGV) == 2) {
+        $settings{'left_log'} = shift(@ARGV);
+        $settings{'right_log'} = shift(@ARGV);
+
+        # If the logs are files then make sure they are absolute paths.
+        if (-f $settings{'left_log'} && $settings{'left_log'} !~ /^\//) {
+            $settings{'left_log'} = "${start_cwd}/$settings{'left_log'}";
+        }
+        if (-f $settings{'right_log'} && $settings{'right_log'} !~ /^\//) {
+            $settings{'right_log'} = "${start_cwd}/$settings{'right_log'}";
+        }
+    }
+    elsif (scalar(@ARGV) == 1 && exists($settings{'list-iips'})) {
+        $settings{'log'} = shift(@ARGV);
+
+        # If the logs are files then make sure they are absolute paths.
+        if (-f $settings{'log'} && $settings{'log'} !~ /^\//) {
+            $settings{'log'} = "${start_cwd}/$settings{'log'}";
+        }
+    }
+    else {
+        error("Unexpected number of arguments", \&usage);
+    }
+
+    if (exists $settings{'description-diff'}
+            && $settings{'description-diff'} !~ /^\//) {
+        $settings{'description-diff'} = "${start_cwd}/$settings{'description-diff'}";
+    }
+}
+
+sub list_iips
+{
+    my $kit_info = get_kit_information_from_log($settings{'log'});
+    print "Kit build info:\n\n";
+    print_kit_information($kit_info);
+
+    my @iips = get_installed_iips_from_log($settings{'log'});
+    my $arch_list = iip_name_to_arch_list([ @iips ]);
+    my @iip_names = sort(keys(%$arch_list));
+    my $upper_length = get_longest_str_length(@iip_names);
+
+    print "\n";
+    print "IIPs in the Kit:\n\n";
+    foreach my $name (@iip_names) {
+        my $arch_str = join(", ", sort @{$arch_list->{$name}});
+        printf("    %-*s%s\n", $upper_length + 4, $name, $arch_str);
+    }
+    print "\n";
+}
+
+sub compare
+{
+    my $left_kit_info = get_kit_information_from_log($settings{'left_log'});
+    print "Kit build info (left):\n\n";
+    print_kit_information($left_kit_info);
+    print "\n";
+
+    my $right_kit_info = get_kit_information_from_log($settings{'right_log'});
+    print "Kit build info (right):\n\n";
+    print_kit_information($right_kit_info);
+    print "\n";
+
+    my @left_iips = get_installed_iips_from_log($settings{'left_log'});
+    my @right_iips = get_installed_iips_from_log($settings{'right_log'});
+
+    my ($left_only_iips, $both_side_iips, $right_only_iips, $all_iips) =
+        compare_lists(\@left_iips, \@right_iips);
+
+    print ".----------------------------------------------------------.\n";
+    print "|                                                          |\n";
+    print "|  Differences in installed IIPs                           |\n";
+    print "|                                                          |\n";
+    print "'----------------------------------------------------------'\n";
+
+    my $arch_list_added = iip_name_to_arch_list([ keys(%$right_only_iips) ]);
+    my $arch_list_removed = iip_name_to_arch_list([ keys(%$left_only_iips) ]);
+    my $arch_list_common = iip_name_to_arch_list([ keys(%$both_side_iips) ]);
+
+    # If the IIP is listed in both arch_list_added and arch_list_removed, it
+    # means that the IIP built for one architecture was removed and replaced
+    # with the same IIP built for a different architecture set.
+    my ($added, $arch_changed, $removed) =
+        compare_key_sets($arch_list_added, $arch_list_removed);
+
+    my @added_iip_names = sort(keys(%$added));
+    my @removed_iip_names = sort(keys(%$removed));
+    my @arch_diff_iip_names = sort(keys(%$arch_changed));
+    my @common_iip_names = sort(keys(%$arch_list_common));
+
+    my $upper_length = get_longest_str_length(
+        @added_iip_names, @removed_iip_names, @arch_diff_iip_names, @common_iip_names);
+
+    print "\n";
+    print "Added IIPs:\n\n";
+    if (@added_iip_names) {
+        foreach my $name (@added_iip_names) {
+            my $arch_str = join(", ", sort @{$arch_list_added->{$name}});
+            printf("    %-*s%s\n", $upper_length + 4, $name, $arch_str);
+        }
+    }
+    else {
+        print "    <None>\n";
+    }
+
+    if (@arch_diff_iip_names) {
+        print "\n";
+        printf("%-*s%s\n\n", $upper_length + 8, "Architecture differences:",
+               "Removed -> Added");
+        foreach my $name (@arch_diff_iip_names) {
+            my $arch_str = (
+                join(", ", @{$arch_list_removed->{$name}})
+                . " -> "
+                . join(", ", @{$arch_list_added->{$name}}));
+            printf("    %-*s%s\n", $upper_length + 4, $name, $arch_str);
+        }
+    }
+
+    print "\n";
+    print "Removed IIPs:\n\n";
+    if (@removed_iip_names) {
+        foreach my $name (@removed_iip_names) {
+            my $arch_str = join(", ", sort @{$arch_list_removed->{$name}});
+            printf("    %-*s%s\n", $upper_length + 4, $name, $arch_str);
+        }
+    }
+    else {
+        print "    <None>\n";
+    }
+
+    print "\n";
+    print "Common IIPs:\n\n";
+    if (@common_iip_names) {
+        foreach my $name (@common_iip_names) {
+            my $arch_str = join(", ", sort @{$arch_list_common->{$name}});
+            printf("    %-*s%s\n", $upper_length + 4, $name, $arch_str);
+        }
+    }
+    else {
+        print "    <None>\n";
+    }
+
+    print "\n";
+
+    if (!exists $settings{'description-diff'}) {
+        return;
+    }
+
+    print ".----------------------------------------------------------.\n";
+    print "|                                                          |\n";
+    print "|  Comparison of IIP description files                     |\n";
+    print "|                                                          |\n";
+    print "'----------------------------------------------------------'\n";
+    print "\n";
+
+    print "Collecting left side information...\n";
+    my %left_build_info = get_build_information($settings{'left_log'});
+    create_description_files("left", \%left_build_info, \@left_iips);
+
+    print "Collecting right side information...\n";
+    my %right_build_info = get_build_information($settings{'right_log'});
+    create_description_files("right", \%right_build_info, \@right_iips);
+
+    print "\n";
+
+    my $cmd = "diff -N -u -r left right > $settings{'description-diff'}";
+    system($cmd) or error("Could not create the diff");
+
+    print "Results file: $settings{'description-diff'}\n";
+
+    print "\n";
+}
+
+sub get_kit_information_from_log
+{
+    my ($log_source) = @_;
+    my @rows;
+    my %info;
+
+    if (-f $log_source) {
+        @rows = split(/\n/, read_file_content($log_source));
+    }
+    else {
+        @rows = `wget --timeout=10 -qO- ${log_source}`;
+    }
+
+    if (scalar(@rows) == 0) {
+        error("Cannot read log: ${log_source}");
+    }
+
+    foreach (@rows) {
+        if (/build_kit: Building kit[^\/]*(\/extra.*\.tgz)/) {
+            my @split_path = split(/\//, $1);
+            my $index = first { $split_path[$_] eq "products" } 0 .. $#split_path;
+            @split_path = grep { ! /^\./ } @split_path;
+
+            $info{'component'} = join("/", @split_path[$index..$#split_path-1]);
+            $info{'file'} = $split_path[-1];
+        }
+        elsif (/Calculating IIP dependencies for (.*)$/) {
+            $info{'arch'} = [] if (!exists($info{'arch'}));
+            push(@{$info{'arch'}}, $1);
+        }
+        elsif (/Installing IIP:/) {
+            last;
+        }
+    }
+
+    if (exists $info{'component'} && exists $info{'file'} && exists $info{'arch'}) {
+        return \%info;
+    }
+    return undef;
+}
+
+sub print_kit_information
+{
+    my ($kit_info) = @_;
+
+    if ($kit_info) {
+        printf("    %-*s%s\n", 20, "Component:", $kit_info->{'component'});
+        printf("    %-*s%s\n", 20, "File:", $kit_info->{'file'});
+        printf("    %-*s%s\n", 20, "Architecture:", join(", ", @{$kit_info->{'arch'}}));
+    }
+    else {
+        print "    Could not be retrieved\n";
+    }
+}
+
+sub get_installed_iips_from_log
+{
+    my ($log_source) = @_;
+    my @rows;
+    my @iips;
+    my $create_marker = 0;
+    my $unpack_marker = 0;
+
+    if (-f $log_source) {
+        @rows = split(/\n/, read_file_content($log_source));
+    }
+    else {
+        @rows = `wget --timeout=10 -qO- ${log_source}`;
+    }
+
+    if (scalar(@rows) == 0) {
+        error("Cannot read log: ${log_source}");
+    }
+
+    foreach (@rows) {
+        if (/Installing (?:IIP|finalizer):\s*(.*)$/) {
+            push @iips, $1;
+        }
+        elsif (/Creating kit archive/) {
+            $create_marker = 1;
+            last;
+        }
+        elsif (/Unpacking kit/) {
+            $unpack_marker = 1;
+            last;
+        }
+    }
+
+    if (!$create_marker && !$unpack_marker) {
+        error("Expected to find markers for when kit has finished building in the log.");
+    }
+    elsif (!$create_marker && $unpack_marker) {
+        print STDERR "Warning: Expected to find the string 'Creating kit archive' in the log.\n";
+    }
+
+    return sort(@iips);
+}
+
+sub get_build_information
+{
+    my ($log_url) = @_;
+    my $unescape = uri_unescape($log_url);
+
+    my $server;
+    my $log_dir;
+
+    if ($unescape =~ /http:\/\/(.+arrisi.com)\//) {
+        $server = $1;
+    }
+    if ($unescape =~ /\/(logs\/log_\d+)\//) {
+        $log_dir = $1;
+    }
+
+    if ($server && $log_dir) {
+        return ("server" => $server, "log_dir" => $log_dir);
+    }
+
+    print "Could not derive build information from the log url: ${log_url}\n";
+    print "Specify the build page URL for the automatic build (e.g. ";
+    print "http://kinklaith.lab.swelin.arrisi.com/build.php?id=372965): ";
+    my $build_page = <>;
+    chomp $build_page;
+
+    return get_build_information_from_build_page($build_page);
+}
+
+sub get_build_information_from_build_page
+{
+    my $build_url = shift;
+    my @rows = `wget --timeout=10 -qO- ${build_url}`;
+
+    if (scalar(@rows) == 0) {
+        error("Cannot read build page: ${build_url}");
+    }
+
+    foreach (@rows) {
+        if (/http:\/\/(.+arrisi.com)\/(logs\/log_\d+)\/products/) {
+            return ("server" => $1, "log_dir" => $2);
+        }
+    }
+
+    error("Invalid build page: ${build_url}");
+}
+
+sub create_description_files
+{
+    my ($root_dir, $build_info, $iips) = @_;
+
+    my %download_files = get_files_to_download($build_info, $iips);
+    download_from_build_server($build_info, \%download_files);
+    extract_comparable_descriptions($root_dir, \%download_files);
+}
+
+sub get_files_to_download
+{
+    my ($build_info, $iips) = @_;
+
+    my @products = get_product_list($build_info);
+    my @iip_products = grep { /\.iip$/ } @products;
+    my @iipinfo_products = grep { /\.iipinfo$/ } @products;
+    my %download_files;
+
+    foreach (@$iips) {
+        my ($name, $arch) = split(/\@/);
+        $arch = "_$arch" if $arch ne "";
+        my $pattern = "${name}(_INTERNAL-USE-ONLY)?_[^_]+${arch}.iip";
+
+        my @product = grep{ /${pattern}/ } @iipinfo_products;
+        my $count = scalar(@product);
+        if ($count == 1) {
+            $download_files{$_} = $product[0];
+        }
+        elsif ($count > 1) {
+            error("Found multiple product matches for $_: @product");
+        }
+        else {
+            my @product = grep{ /${pattern}/ } @iip_products;
+            my $count = scalar(@product);
+            if ($count == 1) {
+                $download_files{$_} = $product[0];
+            }
+            elsif ($count > 1) {
+                error("Found multiple product matches for $_: @product");
+            }
+            else {
+                error("Could not find IIP on build server: $_");
+            }
+        }
+    }
+
+    return %download_files;
+}
+
+sub get_product_list
+{
+    my $build_info = shift;
+    my ($server, $log_dir) = ($build_info->{server}, $build_info->{log_dir});
+    my @products = `ssh ${server} 'ls -1 /extra/kbs/${log_dir}/products'`;
+
+    if (scalar(@products) == 0) {
+        error("Could not read products from server");
+    }
+
+    foreach (@products) {
+        chomp $_;
+    }
+
+    return @products;
+}
+
+sub download_from_build_server
+{
+    my ($build_info, $download_files) = @_;
+
+    my ($server, $log_dir) = ($build_info->{server}, $build_info->{log_dir});
+    my $joined_file_names = join(' ', values %$download_files);
+
+    my $remote_cmd = "cd /extra/kbs/${log_dir}/products; tar cf - ${joined_file_names}";
+    my $cmd = "ssh ${server} '${remote_cmd}' | tar xf -";
+
+    system($cmd);
+}
+
+sub extract_comparable_descriptions
+{
+    my ($root_dir, $download_files) = @_;
+
+    while (my ($iip, $filename) = each %$download_files) {
+        my $info_dir = "${root_dir}/$iip";
+        system("mkdir -p ${info_dir}");
+
+        my $target_file = "${info_dir}/info";
+
+        if ($filename =~ /\.iipinfo$/) {
+            extract_iipinfo_desc_to_temp_file($target_file, $filename);
+        }
+        else {  # iip extension
+            extract_iip_desc_to_temp_file($target_file, $filename);
+        }
+
+        remove_non_comparable_elements($target_file);
+    }
+}
+
+sub extract_iipinfo_desc_to_temp_file
+{
+    my ($target_file, $iipinfo_file) = @_;
+
+    my $content = read_file_content($iipinfo_file);
+    my $info_xml = read_iipinfo_element($content, "info_xml");
+    write_file_content($target_file, $info_xml);
+}
+
+sub extract_iip_desc_to_temp_file
+{
+    my ($target_file, $iip_file) = @_;
+    system("tar zOxf ${iip_file} info.xml > ${target_file}");
+}
+
+sub read_iipinfo_element
+{
+    my ($str, $element) = @_;
+    $str =~ /= begin $element =\n(.*)\n= end $element =/s;
+    if (! defined($1)) {
+        error("Could not find iipinfo element: $element");
+    }
+    return "$1";
+}
+
+sub remove_non_comparable_elements
+{
+    my ($target_file) = @_;
+
+    my $parser = XML::DOM::Parser->new();
+    my $document = $parser->parse(read_file_content($target_file));
+    my $root = $document->getDocumentElement();
+
+    my @remove_elements;
+    push @remove_elements, $root->getElementsByTagName("Architecture", 0);
+    push @remove_elements, $root->getElementsByTagName("Branch", 0);
+    push @remove_elements, $root->getElementsByTagName("Date", 0);
+    push @remove_elements, $root->getElementsByTagName("Name", 0);
+    push @remove_elements, $root->getElementsByTagName("Time", 0);
+    push @remove_elements, $root->getElementsByTagName("Version", 0);
+
+    foreach (@remove_elements) {
+        $root->removeChild($_);
+    }
+
+    write_file_content($target_file, $root->toString() . "\n");
+
+    system('sed -i -E -e "/^\s+$/d" -e "/<\/?Iip>/d" ' . $target_file);
+}
+
+sub compare_lists
+{
+    my ($left, $right) = @_;
+    my %left = map { $_ => 1 } @$left;
+    my %right = map { $_ => 1 } @$right;
+    return compare_key_sets(\%left, \%right);
+}
+
+sub compare_key_sets
+{
+    my ($left, $right) = @_;
+    my %left_only;
+    my %both;
+    my %right_only;
+    my %all;
+
+    foreach (keys %{$left}) {
+        if (! exists $right->{$_}) {
+            $left_only{$_} = 1;
+        }
+        else {
+            $both{$_} = 1;
+        }
+        $all{$_} = 1;
+    }
+
+    foreach (keys %{$right}) {
+        if (! exists $left->{$_}) {
+            $right_only{$_} = 1;
+        }
+        $all{$_} = 1;
+    }
+
+    return (\%left_only, \%both, \%right_only, \%all);
+}
+
+sub iip_name_to_arch_list
+{
+    my ($iips) = @_;
+    my %name_to_archs;
+
+    foreach (@$iips) {
+        my ($name, $arch) = split(/\@/);
+        $arch = "noarch" if $arch eq "";
+
+        if (!exists $name_to_archs{$name}) {
+            $name_to_archs{$name} = [];
+        }
+        push @{$name_to_archs{$name}}, $arch;
+    }
+
+    return \%name_to_archs;
+}
+
+sub compare_files
+{
+    my ($left_file, $right_file, $options) = @_;
+
+    if (!defined($options)) {
+        $options = "-u";
+    }
+
+    my @diff_output = `diff $options $left_file $right_file`;
+    if (scalar(@diff_output)) {
+        @diff_output = grep { ! /^(\+\+\+|---)/ } @diff_output;
+        @diff_output = grep { ! /^\\ No newline at end of file$/ } @diff_output;
+    }
+
+    return @diff_output;
+}
+
+sub get_longest_str_length
+{
+    my $max_length = 0;
+    foreach my $str (@_) {
+        my $length = length($str);
+        $max_length = $length if ($length > $max_length);
+    }
+    return $max_length;
+}
+
+sub command_error
+{
+    my $command = shift;
+    my $context = shift;
+    error("$command failed at @{$context}[1] line @{$context}[2]");
+}
+
+sub read_file_content
+{
+    my ($path, $encoding) = @_;
+
+    $encoding ||= "raw";
+    my @context = caller;
+    open FILE, "<:$encoding", $path
+        or command_error("read_file_content", \@context);
+    return do { local $/; <FILE> };
+}
+
+sub write_file_content {
+    my ($path, $content, $encoding) = @_;
+
+    $encoding ||= "raw";
+    my @context = caller;
+    open FILE, ">:$encoding", $path
+        or command_error("write_file_content", \@context);
+    print FILE $content or command_error("write_file_content", \@context);
+    close FILE;
+}

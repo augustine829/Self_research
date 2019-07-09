@@ -1,0 +1,12 @@
+#!/bin/sh
+#branch=`svn info | grep URL | cut -d '/'  -f 7`
+folder=`pwd`
+make "$@"
+result=$?
+if [ $result -eq 0 ]; then
+	notify-send -t 0 "Make finished" "$folder"
+else
+	notify-send -t 0 -u critical "Make failed, error #$result." "$folder"
+fi
+exit $result
+
